@@ -33,7 +33,7 @@ def media_info(ffprobe, path):
                                '-show_streams', '-show_format', '-of', 'json', path]))
 
 
-def sampled_run(args, log, samples):
+def sampled_run(args, log, samples, cwd=ROOT):
     monitor = None
     started = time.perf_counter()
     smi = shutil.which('nvidia-smi')
@@ -43,7 +43,7 @@ def sampled_run(args, log, samples):
                 monitor = subprocess.Popen([smi, '--query-gpu=uuid,name,memory.used',
                                             '--format=csv,noheader,nounits', '-lms', '200'],
                                            stdout=output, stderr=subprocess.DEVNULL)
-            command(args, log)
+            command(args, log, cwd=cwd)
     finally:
         if monitor:
             monitor.terminate()

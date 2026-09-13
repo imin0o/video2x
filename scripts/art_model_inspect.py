@@ -68,6 +68,10 @@ def inspect_model(param, binary):
                 tensor(name, 'bias', channels)
         elif kind == 'PReLU':
             tensor(name, 'slope', int(params['0']))
+        elif kind == 'Scale':
+            tensor(name, 'scale', int(params['0']))
+            if int(params.get('1', 0)):
+                tensor(name, 'bias', int(params['0']))
         elif kind not in ('Input', 'Split', 'PixelShuffle', 'Interp', 'BinaryOp'):
             raise ValueError(f'Unsupported layer: {kind}')
         layers.append(entry)
