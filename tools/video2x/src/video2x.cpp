@@ -10,6 +10,7 @@
 #endif
 
 #include <libvideo2x/logger_manager.h>
+#include <gpu.h>
 
 #include "argparse.h"
 #include "newline_safe_sink.h"
@@ -53,6 +54,11 @@ int wmain(int argc, wchar_t* argv[]) {
 #else
 int main(int argc, char** argv) {
 #endif
+    // Release Vulkan devices before Windows starts unloading the driver DLLs.
+    struct GpuInstanceCleanup {
+        ~GpuInstanceCleanup() { ncnn::destroy_gpu_instance(); }
+    } gpu_instance_cleanup;
+
     // Initialize newline-safe logger with custom formatting pattern
     std::shared_ptr<newline_safe_sink> logger_sink = std::make_shared<newline_safe_sink>();
     std::vector<spdlog::sink_ptr> sinks = {logger_sink};

@@ -413,7 +413,7 @@ if(VIDEO2X_BUILD_CLI)
     )
 
     # Link the executable with the shared library
-    target_link_libraries(video2x PRIVATE libvideo2x)
+    target_link_libraries(video2x PRIVATE libvideo2x ncnn)
 
     # Set debug compile options
     if(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")

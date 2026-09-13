@@ -1,10 +1,15 @@
 #include "filter_realesrgan.h"
 
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <filesystem>
 
 #include <spdlog/spdlog.h>
+
+extern "C" {
+#include <libavutil/hash.h>
+}
 
 #include "conversions.h"
 #include "fsutils.h"
@@ -77,10 +82,13 @@ int FilterRealesrgan::init(AVCodecContext* dec_ctx, AVCodecContext* enc_ctx, AVB
     out_pix_fmt_ = enc_ctx->pix_fmt;
 
     // Load the model
+    const auto load_start = std::chrono::steady_clock::now();
     if (realesrgan_->load(model_param_full_path.value(), model_bin_full_path.value()) != 0) {
         logger()->error("Failed to load Real-ESRGAN model");
         return -1;
     }
+    logger()->debug("[art-baseline] model_load_ms={:.3f}",
+        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - load_start).count());
 
     // Set Real-ESRGAN parameters
     realesrgan_->scale = scaling_factor_;
@@ -97,6 +105,9 @@ int FilterRealesrgan::init(AVCodecContext* dec_ctx, AVCodecContext* enc_ctx, AVB
     } else {
         realesrgan_->tilesize = 32;
     }
+    logger()->debug("[art-baseline] gpu={} heap_budget_mb={} tile={} scale={} prepadding={} tta={}",
+        gpuid_, heap_budget, realesrgan_->tilesize, realesrgan_->scale,
+        realesrgan_->prepadding, tta_mode_);
 
     return 0;
 }
@@ -104,7 +115,7 @@ int FilterRealesrgan::init(AVCodecContext* dec_ctx, AVCodecContext* enc_ctx, AVB
 int FilterRealesrgan::filter(AVFrame* in_frame, AVFrame** out_frame) {
     int ret;
 
-    // Convert the input frame to RGB24
+    // Convert the input frame to BGR24
     ncnn::Mat in_mat = conversions::avframe_to_ncnn_mat(in_frame);
     if (in_mat.empty()) {
         logger()->error("Failed to convert AVFrame to ncnn::Mat");
@@ -116,10 +127,27 @@ int FilterRealesrgan::filter(AVFrame* in_frame, AVFrame** out_frame) {
     int output_height = in_mat.h * realesrgan_->scale;
     ncnn::Mat out_mat = ncnn::Mat(output_width, output_height, static_cast<size_t>(3), 3);
 
+    const auto inference_start = std::chrono::steady_clock::now();
     ret = realesrgan_->process(in_mat, out_mat);
+    logger()->debug("[art-baseline] pts={} inference_ms={:.3f} result={}", in_frame->pts,
+        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - inference_start).count(), ret);
     if (ret != 0) {
         logger()->error("Real-ESRGAN processing failed");
         return ret;
+    }
+    if (logger()->should_log(spdlog::level::debug)) {
+        AVHashContext* hash = nullptr;
+        if (av_hash_alloc(&hash, "sha256") < 0) {
+            return AVERROR(ENOMEM);
+        }
+        av_hash_init(hash);
+        av_hash_update(hash, static_cast<const uint8_t*>(out_mat.data),
+            static_cast<size_t>(output_width) * output_height * 3);
+        uint8_t digest[65];
+        av_hash_final_hex(hash, digest, sizeof(digest));
+        av_hash_freep(&hash);
+        logger()->debug("[art-baseline] pts={} pixel_sha256={}", in_frame->pts,
+            reinterpret_cast<const char*>(digest));
     }
 
     // Convert ncnn::Mat to AVFrame
