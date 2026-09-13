@@ -22,7 +22,7 @@ def samples(path, indices):
 
 def verify(directory, time_directory=None):
     review = read(directory / 'review.json')
-    if review['status'] != 'completed_awaiting_creator':
+    if review['status'] not in ('completed_awaiting_creator', 'expression_rejected'):
         raise ValueError('Complete the experiment suite before reviewing')
     runs = {c['name']: read(Path(c['run'])) for c in review['candidates']}
     baseline = runs['zero']['baseline']
@@ -97,12 +97,14 @@ def verify(directory, time_directory=None):
         report['short_long_prefixes_match'] = True
         report['time_comparison'] = temporal
     save_json(directory / 'metrics.json', report)
+    feedback = review.get('acceptance', {}).get('creator_feedback', '')
+    feedback_note = f'<p>Creator feedback: {html.escape(feedback)}</p>' if feedback else ''
     page = ('<!doctype html><html lang="en"><meta charset="utf-8"><title>M1 comparisons</title>'
             '<style>body{font:16px system-ui;background:#151515;color:#eee;margin:24px}'
             'main{display:grid;grid-template-columns:repeat(auto-fit,minmax(520px,1fr));gap:24px}'
             'article{background:#252525;padding:16px}video{width:100%}a{color:#9bcaff}'
             'pre{white-space:pre-wrap}h2{font-size:19px}@media(max-width:600px){main{display:block}}</style>'
-            '<h1>M1 comparisons</h1><p>Top: input / normal. Bottom: Gaussian blur / candidate. '
+            '<h1>M1 comparisons</h1>' + feedback_note + '<p>Top: input / normal. Bottom: Gaussian blur / candidate. '
             'Each video contains the same timestamps and display sizes. Audio is omitted.</p>'
             '<p>A01: select a shape/texture recipe. A02: select an uncanny blur recipe. '
             'Record adopted/deferred candidates and reasons in <a href="review.json">review.json</a>.</p>'

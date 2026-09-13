@@ -10,6 +10,7 @@ import numpy as np
 from PIL import Image, ImageFilter
 
 from art_experiment_model import rng
+from art_experiment_color import restore_source_color
 
 
 class InputNoise:
@@ -96,7 +97,12 @@ def transform(source, destination, settings, start=0, original=None, output_size
                     ref = next(reference, None)
                     if ref is None or ref.pts * ref.time_base != frame.pts * frame.time_base:
                         raise ValueError('Original/result frame timestamps differ')
-                    original_pixels = resize(ref.to_ndarray(format='bgr24'), stream.width, stream.height)
+                    raw_reference = ref.to_ndarray(format='bgr24')
+                    original_pixels = resize(raw_reference, stream.width, stream.height)
+                    if stage == 'output' and settings.get('source_color', 0):
+                        color_reference = resize(blur(raw_reference, settings['input_blur']), stream.width, stream.height)
+                        pixels = restore_source_color(pixels, color_reference,
+                                                      settings['source_color'], settings['luma_change'])
                     pixels = blend(pixels, original_pixels, settings['retain'])
                 updates.append((time.perf_counter() - update) * 1000)
                 clipped += int(np.count_nonzero((pixels == 0) | (pixels == 255)))

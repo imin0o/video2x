@@ -12,7 +12,8 @@ MODEL_HASHES = ('1393f7c0e885f9d15a0668329a13f695ebd0ea45791f46d28145d7934824d22
 DEFAULTS = dict(version=1, seed=0, weight_mode='noise', weight_strength=0.0,
                 weight_layers=['Conv_16'], feature_mode='decay', feature_strength=0.0,
                 feature_layer='PRelu_17', input_noise=0.0, time_mode='fixed', period=4.0,
-                phase=0.0, input_blur=0.0, output_blur=0.0, passes=1, retain=0.0)
+                phase=0.0, input_blur=0.0, output_blur=0.0, passes=1, retain=0.0,
+                source_color=0.0, luma_change=0.5)
 
 
 def rng(seed, purpose):
@@ -27,7 +28,8 @@ def recipe(values):
     for key, low, high in [('weight_strength', 0, 2), ('feature_strength', 0, 1),
                            ('input_noise', 0, 128), ('period', 0.01, 3600),
                            ('phase', -3600, 3600), ('input_blur', 0, 30),
-                           ('output_blur', 0, 30), ('retain', 0, 1)]:
+                           ('output_blur', 0, 30), ('retain', 0, 1),
+                           ('source_color', 0, 1), ('luma_change', 0, 1)]:
         value = result[key]
         if type(value) not in (int, float) or not math.isfinite(value) or not low <= value <= high:
             raise ValueError(f'{key} must be finite in [{low}, {high}]')

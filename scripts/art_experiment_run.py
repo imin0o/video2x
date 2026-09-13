@@ -37,12 +37,14 @@ def baseline_context(directory, cli):
     return record
 
 
-def comparison(baseline, candidate, directory):
+def comparison(baseline, candidate, directory, input_blur_control=None):
     clip = Path(baseline['prepared_input']['path'])
     normal = Path(baseline['runs'][0]['output'])
-    blur = clip.parent / 'blur.mkv'
+    blur = input_blur_control or clip.parent / 'blur.mkv'
     paths = [clip, normal, blur, candidate]
     labels = ['INPUT', 'NORMAL', 'GAUSSIAN BLUR', re.sub(r'[^A-Za-z0-9_-]', '_', directory.name)]
+    if input_blur_control:
+        labels[2] = 'INPUT BLUR - SAME STRENGTH'
     # Explicit font avoids this Windows FFmpeg build's missing fontconfig configuration.
     font = Path('C:/Windows/Fonts/arial.ttf')
     shutil.copyfile(font, directory / 'label.ttf')
@@ -61,7 +63,7 @@ def comparison(baseline, candidate, directory):
     command([FFMPEG, '-hide_banner', '-loglevel', 'error', '-nostdin', '-n', '-i', target,
              '-frames:v', '1', '-update', '1', directory / 'comparison.png'])
     return dict(video=str(target), still=str(directory / 'comparison.png'),
-                layout=labels, display_width_per_panel=640)
+                layout=labels, display_width_per_panel=640, blur_control=str(blur))
 
 
 def execute(baseline, directory, settings, cli, make_comparison=True):
@@ -77,6 +79,7 @@ def execute(baseline, directory, settings, cli, make_comparison=True):
                                  features='64 channel-constant normal biases, attenuation or seeded channel mask',
                                  time='source start + decoded clip PTS; raised-cosine blend of two fixed fields',
                                  reinput='second pass is unmodified; Lanczos to source dimensions first',
+                                 source_color='source chroma + mean/std-matched damaged luma; gamut-limited; input blur applied to color reference',
                                  audio='omitted for M1 visual experiments'))
     manifest = directory / 'run.json'
     save_json(directory / 'recipe.json', settings)
@@ -129,7 +132,7 @@ def execute(baseline, directory, settings, cli, make_comparison=True):
                                        measurements=measurements, **diagnostics))
             save_json(manifest, record)
         result = output
-        if settings['output_blur'] or settings['retain']:
+        if settings['output_blur'] or settings['retain'] or settings.get('source_color', 0):
             result = directory / 'result.mkv'
             record['transformations'].append(transform(output, result, settings, original=clip, stage='output'))
         record['verification'] = dict(frame_count=len(source_frames), tail_time=source_frames[-1]['time'],
@@ -138,7 +141,8 @@ def execute(baseline, directory, settings, cli, make_comparison=True):
                                       first_pass_matches_baseline=(record['runs'][0]['pre_encode_frames']
                                                                   == baseline_run['pre_encode_frames']))
         if make_comparison:
-            record['comparison'] = comparison(baseline, result, directory)
+            control = directory / 'injected.mkv' if settings['input_blur'] and not settings['input_noise'] else None
+            record['comparison'] = comparison(baseline, result, directory, control)
         record['result'] = str(result)
         record['status'] = 'completed'
     except BaseException as error:
