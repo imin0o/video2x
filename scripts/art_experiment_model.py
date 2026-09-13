@@ -38,7 +38,7 @@ def recipe(values):
             raise ValueError(f'Invalid {key}')
     for key, choices in [('weight_mode', ('noise', 'decay')),
                          ('feature_mode', ('noise', 'decay', 'mask')),
-                         ('time_mode', ('fixed', 'smooth'))]:
+                         ('time_mode', ('fixed', 'smooth', 'smooth-constant'))]:
         if result[key] not in choices:
             raise ValueError(f'Unsupported {key}')
     if result['weight_mode'] == 'decay' and result['weight_strength'] > 1:
@@ -63,23 +63,23 @@ def model_copy(directory, settings):
     for tensor in inventory['tensors']:
         if tensor['role'] != 'weight' or tensor['layer'] not in settings['weight_layers']:
             continue
-        strength = settings['weight_strength']
-        if strength == 0:
+        weight_strength = settings['weight_strength']
+        if weight_strength == 0:
             continue
         dtype = '<f2' if tensor['dtype'] == 'fp16' else '<f4'
         offset, size = tensor['offset'], tensor['bytes']
         values = np.frombuffer(data[offset:offset + size], dtype=dtype).astype(np.float64)
         if settings['weight_mode'] == 'noise':
             values += (rng(settings['seed'], 'weight:' + tensor['layer']).standard_normal(values.size)
-                       * strength * tensor['rms'])  # An all-zero tensor remains zero.
+                       * weight_strength * tensor['rms'])  # An all-zero tensor remains zero.
         else:
-            values *= 1 - strength
+            values *= 1 - weight_strength
         if not np.isfinite(values).all() or np.max(np.abs(values)) > np.finfo(dtype).max:
             raise ValueError('Mutated weight exceeds its finite encoding range')
         data[offset:offset + size] = values.astype(dtype).tobytes()
     text = original_param.read_text(encoding='utf-8')
-    strength = settings['feature_strength']
-    if strength:
+    feature_strength = settings['feature_strength']
+    if feature_strength:
         # A real intermediate operation after PReLU, before the following convolution.
         # Channel noise/masks are spatially constant, including tile overlap/padding.
         target = next(x for x in inventory['layers'] if x['name'] == settings['feature_layer'])
@@ -97,11 +97,11 @@ def model_copy(directory, settings):
         scales, biases = np.ones(64), np.zeros(64)
         random = rng(settings['seed'], 'feature:' + target['name'])
         if settings['feature_mode'] == 'noise':
-            biases = random.standard_normal(64) * strength
+            biases = random.standard_normal(64) * feature_strength
         elif settings['feature_mode'] == 'decay':
-            scales *= 1 - strength
+            scales *= 1 - feature_strength
         else:
-            scales = (random.random(64) >= strength).astype(float)
+            scales = (random.random(64) >= feature_strength).astype(float)
         prior = {x['name'] for x in inventory['layers'][:line_index - 1]}
         end = max(t['offset'] + t['bytes'] for t in inventory['tensors'] if t['layer'] in prior)
         data[end:end] = scales.astype('<f4').tobytes() + biases.astype('<f4').tobytes()
@@ -109,7 +109,7 @@ def model_copy(directory, settings):
     directory.mkdir(parents=True, exist_ok=False)
     base = directory / 'realesr-animevideov3'
     param, binary = directory / 'realesr-animevideov3-x2.param', directory / 'realesr-animevideov3-x2.bin'
-    param.write_bytes(text.encode('utf-8') if strength else original_param.read_bytes())
+    param.write_bytes(text.encode('utf-8') if feature_strength else original_param.read_bytes())
     binary.write_bytes(data)
     inspect_model(param, binary)
     return base, dict(param_sha256=sha256(param), binary_sha256=sha256(binary),

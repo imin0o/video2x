@@ -1,5 +1,6 @@
 """Verify saved M1 experiments and build a local comparison index for creator review."""
 import argparse
+import hashlib
 import html
 import json
 import os
@@ -68,7 +69,6 @@ def verify(directory, time_directory=None):
     # Full-frame endpoint verification, not just the three visual samples.
     retained = video_signature(runs['retain-original']['result'])
     reference = frames(baseline['prepared_input']['path'])
-    import hashlib
     try:
         for item, frame in zip(retained, reference, strict=True):
             pixels = resize(frame.to_ndarray(format='bgr24'), item['width'], item['height'])

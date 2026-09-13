@@ -15,13 +15,17 @@ from art_probe_support import save_json
 
 def candidates():
     all_layers = [f'Conv_{i}' for i in range(0, 35, 2)]
+    melts = [(8, 0.4, 0.5), (16, 0.6, 0.5), (24, 0.8, 0.7)]
     return [(f'all-noise-{value:g}', dict(weight_layers=all_layers, weight_strength=value))
             for value in (0.25, 0.4, 0.6, 0.8, 1.2)] + [
                 ('early-noise-2', dict(weight_layers=['Conv_0', 'Conv_2', 'Conv_4'], weight_strength=2)),
                 ('late-noise-2', dict(weight_layers=['Conv_30', 'Conv_32', 'Conv_34'], weight_strength=2))] + [
                     (f'melt-{radius}', dict(weight_layers=all_layers, weight_strength=strength,
-                                            input_blur=radius))
-                    for radius, strength in ((8, 0.4), (16, 0.6), (24, 0.8))]
+                                            input_blur=radius, luma_change=luma))
+                    for radius, strength, luma in melts] + [
+                    # Ablation: identical blur and color finishing with the distributed weights.
+                    (f'melt-{radius}-weights-0', dict(input_blur=radius, luma_change=luma))
+                    for radius, _, luma in melts]
 
 
 def first_pixels(path):
@@ -36,15 +40,15 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--baseline-dir', type=Path, required=True)
     parser.add_argument('--output-dir', type=Path, required=True)
+    parser.add_argument('--cli', type=Path, default=ROOT / 'build/art/install/bin/video2x.exe')
     parser.add_argument('--seed', type=int, default=0)
     parser.add_argument('--select', nargs='+', choices=[name for name, _ in candidates()])
     parser.add_argument('--raw-colors', action='store_true', help='Uncorrected model colors for diagnostic intermediates')
     args = parser.parse_args()
-    cli = ROOT / 'build/art/install/bin/video2x.exe'
+    cli = args.cli.resolve()
     baseline = baseline_context(args.baseline_dir.resolve(), cli)
-    settings = [(name, recipe(values | dict(seed=args.seed, source_color=0 if args.raw_colors else 1,
-                                           luma_change=0.7 if name == 'melt-24' else 0.5))) for name, values in candidates()
-                if not args.select or name in args.select]
+    settings = [(name, recipe(values | dict(seed=args.seed, source_color=0 if args.raw_colors else 1)))
+                for name, values in candidates() if not args.select or name in args.select]
     normal = first_pixels(baseline['runs'][0]['output'])
     directory = args.output_dir.resolve()
     directory.mkdir(parents=True, exist_ok=False)

@@ -1,0 +1,61 @@
+{
+  "schema_version": 1,
+  "date": "2026-09-13",
+  "creator_feedback": "いい感じ。R10完了扱いでOK",
+  "constraints": {
+    "destruction": "stronger detail and contour damage permitted",
+    "color": "retain source colors; no neon final output"
+  },
+  "acceptance": {
+    "A01": true,
+    "A02": true,
+    "status": "accepted_by_creator",
+    "R10": "completed",
+    "M1": "completed"
+  },
+  "adopted": [
+    {
+      "name": "melt-16",
+      "role": "標準",
+      "run": "build/art/m1-source-color/melt-16/run.json",
+      "pilot": "build/art/m1-color-probe/melt-16/run.json",
+      "control": "build/art/m1-ablation/melt-16-weights-0/run.json"
+    },
+    {
+      "name": "melt-24",
+      "role": "強め",
+      "run": "build/art/m1-source-color/melt-24/run.json",
+      "pilot": "build/art/m1-color-probe/melt-24/run.json",
+      "control": "build/art/m1-ablation/melt-24-weights-0/run.json"
+    }
+  ],
+  "deferred": [
+    {
+      "directory": "build/art/m1-results",
+      "reason": "どれもディティール失われた感じないし、不気味な感じもなかった",
+      "reason_source": "creator"
+    },
+    {
+      "directory": "build/art/m1-destruction-probe",
+      "reason": "全層と序盤・終盤の強度を選ぶ3フレームの中間結果。制作者の個別評価はなく、5秒比較へはall-noise-0.8だけを進めた",
+      "reason_source": "record"
+    },
+    {
+      "directory": "build/art/m1-melt-probe",
+      "candidates": ["melt-8"],
+      "reason": "5秒比較へ進めなかった。制作者の個別評価と選外理由の記録はない",
+      "reason_source": "record"
+    },
+    {
+      "directory": "build/art/m1-melt-probe",
+      "candidates": ["melt-16", "melt-24"],
+      "reason": "同じレシピの5秒版（m1-destruction-v2）へ引き継いだ3フレームの未補正試作",
+      "reason_source": "record"
+    },
+    {
+      "directory": "build/art/m1-destruction-v2",
+      "reason": "最終出力は極彩色にせず、ある程度元動画の色を保ちたい",
+      "reason_source": "creator"
+    }
+  ]
+}

@@ -37,6 +37,14 @@ def baseline_context(directory, cli):
     return record
 
 
+def resolved_model(working_directory, base, expected):
+    """video2x tries models/ relative to its cwd before its executable directory; require that hit."""
+    files = [working_directory / 'models/realesrgan' / f'{base.name}-x2{suffix}' for suffix in ('.param', '.bin')]
+    if tuple(sha256(path) if path.is_file() else None for path in files) != tuple(expected):
+        raise ValueError(f'Model under {working_directory} is missing or differs; the CLI would load another model')
+    return [str(path) for path in files]
+
+
 def comparison(baseline, candidate, directory, input_blur_control=None):
     clip = Path(baseline['prepared_input']['path'])
     normal = Path(baseline['runs'][0]['output'])
@@ -47,7 +55,6 @@ def comparison(baseline, candidate, directory, input_blur_control=None):
         labels[2] = 'INPUT BLUR - SAME STRENGTH'
     # Explicit font avoids this Windows FFmpeg build's missing fontconfig configuration.
     font = Path('C:/Windows/Fonts/arial.ttf')
-    shutil.copyfile(font, directory / 'label.ttf')
     filters = ';'.join(f'[{i}:v]scale=640:-2:flags=lanczos,setsar=1,'
                        f'drawtext=fontfile=label.ttf:text={label}:fontsize=20:fontcolor=white:box=1:boxcolor=black@0.7[v{i}]'
                        for i, label in enumerate(labels))
@@ -56,10 +63,13 @@ def comparison(baseline, candidate, directory, input_blur_control=None):
     invocation = [FFMPEG, '-hide_banner', '-loglevel', 'error', '-nostdin', '-n']
     for path in paths:
         invocation += ['-i', path]
-    command(invocation + ['-filter_complex', filters, '-map', '[v]', '-an', '-c:v', 'libx264',
-                          '-preset', 'veryfast', '-crf', '18', '-pix_fmt', 'yuv420p', target],
-            directory / 'comparison.log', cwd=directory)
-    (directory / 'label.ttf').unlink()
+    shutil.copyfile(font, directory / 'label.ttf')
+    try:
+        command(invocation + ['-filter_complex', filters, '-map', '[v]', '-an', '-c:v', 'libx264',
+                              '-preset', 'veryfast', '-crf', '18', '-pix_fmt', 'yuv420p', target],
+                directory / 'comparison.log', cwd=directory)
+    finally:
+        (directory / 'label.ttf').unlink()
     command([FFMPEG, '-hide_banner', '-loglevel', 'error', '-nostdin', '-n', '-i', target,
              '-frames:v', '1', '-update', '1', directory / 'comparison.png'])
     return dict(video=str(target), still=str(directory / 'comparison.png'),
@@ -113,6 +123,8 @@ def execute(baseline, directory, settings, cli, make_comparison=True):
                           '--no-copy-subtitle-streams', '--log-level', 'debug', '--no-progress']
             log = directory / f'pass-{index + 1}.log'
             working_directory = directory if index == 0 else ROOT
+            expected = (record['model']['param_sha256'], record['model']['binary_sha256']) if index == 0 else MODEL_HASHES
+            model_files = resolved_model(working_directory, base, expected)
             measurements = sampled_run(invocation, log, directory / f'gpu-{index + 1}.csv',
                                        cwd=working_directory)
             diagnostics = parse_diagnostics(log)
@@ -129,7 +141,7 @@ def execute(baseline, directory, settings, cli, make_comparison=True):
                 raise ValueError('Inference changed frame times/count or expected dimensions')
             pending.rename(output)
             record['runs'].append(dict(command=list(map(str, invocation)), cwd=str(working_directory), output=str(output),
-                                       measurements=measurements, **diagnostics))
+                                       model_files=model_files, measurements=measurements, **diagnostics))
             save_json(manifest, record)
         result = output
         if settings['output_blur'] or settings['retain'] or settings.get('source_color', 0):

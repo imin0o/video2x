@@ -23,9 +23,12 @@ class InputNoise:
         if strength == 0:
             return pixels
         field = self.first
-        if mode == 'smooth':
+        if mode in ('smooth', 'smooth-constant'):
             alpha = (1 - math.cos(2 * math.pi * (seconds / period + phase))) / 2
             field = (1 - alpha) * field + alpha * self.second
+            if mode == 'smooth-constant':
+                # Independent unit fields: keep the noise variance constant across the blend.
+                field /= math.sqrt((1 - alpha) ** 2 + alpha ** 2)
         return np.clip(np.rint(pixels.astype(np.float32) + strength * field), 0, 255).astype(np.uint8)
 
 
@@ -98,12 +101,12 @@ def transform(source, destination, settings, start=0, original=None, output_size
                     if ref is None or ref.pts * ref.time_base != frame.pts * frame.time_base:
                         raise ValueError('Original/result frame timestamps differ')
                     raw_reference = ref.to_ndarray(format='bgr24')
-                    original_pixels = resize(raw_reference, stream.width, stream.height)
                     if stage == 'output' and settings.get('source_color', 0):
                         color_reference = resize(blur(raw_reference, settings['input_blur']), stream.width, stream.height)
                         pixels = restore_source_color(pixels, color_reference,
                                                       settings['source_color'], settings['luma_change'])
-                    pixels = blend(pixels, original_pixels, settings['retain'])
+                    if settings['retain']:
+                        pixels = blend(pixels, resize(raw_reference, stream.width, stream.height), settings['retain'])
                 updates.append((time.perf_counter() - update) * 1000)
                 clipped += int(np.count_nonzero((pixels == 0) | (pixels == 255)))
                 values += pixels.size

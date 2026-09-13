@@ -102,6 +102,15 @@ class FrameTests(unittest.TestCase):
         self.assertFalse(np.array_equal(noise.apply(pixels, 12, 0),
                                          noise.apply(pixels, 12, 2, 'smooth')))
 
+    def test_smooth_constant_keeps_noise_variance_at_the_blend_midpoint(self):
+        pixels = np.full((96, 96, 3), 128, dtype=np.uint8)
+        noise = InputNoise(pixels.shape, 3)
+        spread = {mode: float(np.std(noise.apply(pixels, 10, 1, mode).astype(np.float32) - 128))
+                  for mode in ('fixed', 'smooth', 'smooth-constant')}
+        self.assertAlmostEqual(spread['smooth-constant'] / spread['fixed'], 1, delta=0.03)
+        self.assertAlmostEqual(spread['smooth'] / spread['fixed'], 0.5 ** 0.5, delta=0.03)
+        np.testing.assert_array_equal(noise.apply(pixels, 10, 0, 'smooth-constant'), noise.apply(pixels, 10, 0))
+
     def test_retain_endpoints_and_rounding(self):
         a = np.full((2, 3, 3), 20, np.uint8)
         b = np.full_like(a, 100)

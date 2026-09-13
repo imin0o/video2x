@@ -10,9 +10,19 @@ import PIL
 
 from art_experiment_frames import transform
 from art_experiment_model import MODEL_HASHES, recipe
-from art_experiment_run import comparison
+from art_experiment_run import FFMPEG, comparison
 from art_model_inspect import MODEL, ROOT, sha256
-from art_probe_support import save_json
+from art_probe_support import decoded_hashes, save_json
+
+
+def verify_parent(parent, directory):
+    """Re-check the raw inference bytes now; a completed status alone is not evidence."""
+    if parent.get('original_hashes_preserved') is not True:
+        raise ValueError('Parent run did not preserve the original input/model hashes')
+    recorded = [frame['sha256'] for frame in parent['runs'][-1]['pre_encode_frames']]
+    if decoded_hashes(FFMPEG, Path(parent['result']), directory / 'parent-decoded.sha256') != recorded:
+        raise ValueError('Parent raw inference no longer matches its recorded pre-encode pixels')
+    return dict(decoded_frames=len(recorded), matches_recorded_pre_encode_pixels=True)
 
 
 def finish(run_path, directory, source_color=1, luma_change=0.5):
@@ -36,6 +46,7 @@ def finish(run_path, directory, source_color=1, luma_change=0.5):
     save_json(manifest, record)
     started = time.perf_counter()
     try:
+        record['parent_verification'] = verify_parent(parent, directory)
         result = directory / 'result.mkv'
         evidence = transform(parent['result'], result, settings, original=clip, stage='output')
         record['transformations'].append(evidence)
