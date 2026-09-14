@@ -10,19 +10,20 @@ import time
 from pathlib import Path
 
 from art_model_inspect import ROOT, sha256
-from art_processing_session import progress, run_process
+from art_processing_session import run_process, timed
 
 TILE_VARIABLE = 'VIDEO2X_ART_TILE'
 
 
 def command(args, log=None, cwd=ROOT, env=None, on_tick=None):
     args = list(map(str, args))
-    if log:
-        with Path(log).open('w', encoding='utf-8') as output:
-            run_process(args, cwd=cwd, stdout=output, stderr=subprocess.STDOUT, env=env, on_tick=on_tick)
-        return ''
-    return run_process(args, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                       encoding='utf-8', errors='replace', env=env)
+    with timed('subprocess'):
+        if log:
+            with Path(log).open('w', encoding='utf-8') as output:
+                run_process(args, cwd=cwd, stdout=output, stderr=subprocess.STDOUT, env=env, on_tick=on_tick)
+            return ''
+        return run_process(args, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                           encoding='utf-8', errors='replace', env=env)
 
 
 def save_json(path, value):
@@ -37,7 +38,7 @@ def media_info(ffprobe, path):
                                '-show_streams', '-show_format', '-of', 'json', path]))
 
 
-def sampled_run(args, log, samples, cwd=ROOT, tile=None):
+def sampled_run(args, log, samples, cwd=ROOT, tile=None, on_frames=None):
     # A leftover shell value must not pin tiles silently; only an explicit request sets it.
     env = {key: value for key, value in os.environ.items() if key.upper() != TILE_VARIABLE}
     if tile is not None:
@@ -52,14 +53,14 @@ def sampled_run(args, log, samples, cwd=ROOT, tile=None):
         if time.perf_counter() - last_tick >= 0.5:
             last_tick = time.perf_counter()
             text = Path(log).read_text(encoding='utf-8', errors='replace')
-            progress('inference', len(re.findall(r'\[art-baseline\] pts=-?\d+ pixel_sha256=', text)))
+            on_frames(len(re.findall(r'\[art-baseline\] pts=-?\d+ pixel_sha256=', text)))
     try:
         with samples.open('w', encoding='utf-8') as output:
             if smi:
                 monitor = subprocess.Popen([smi, '--query-gpu=uuid,name,memory.used',
                                             '--format=csv,noheader,nounits', '-lms', '200'],
                                            stdout=output, stderr=subprocess.DEVNULL)
-            command(args, log, cwd=cwd, env=env, on_tick=tick if log else None)
+            command(args, log, cwd=cwd, env=env, on_tick=tick if log and on_frames else None)
     finally:
         if monitor:
             monitor.terminate()

@@ -7,12 +7,14 @@ import struct
 from collections import Counter
 from pathlib import Path
 
+from art_processing_session import timed
+
 ROOT = Path(__file__).resolve().parents[1]
 MODEL = ROOT / 'models/realesrgan/realesr-animevideov3-x2'
 
 
 def sha256(path):
-    with Path(path).open('rb') as stream:
+    with timed('file_hash'), Path(path).open('rb') as stream:
         return hashlib.file_digest(stream, 'sha256').hexdigest()
 
 

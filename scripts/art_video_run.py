@@ -14,7 +14,22 @@ from art_video_output import export_video
 from art_video_source import prepare, validate_request
 
 
-def run_video(baseline, directory, values, cli, video, session=None, replay=None):
+def remove_intermediates(directory):
+    """Only videos this run generated; input.mkv, logs, JSON and hashes stay as evidence."""
+    removed, failures = [], {}
+    for path in [*sorted((directory / 'work').glob('*.mkv')), directory / 'video.partial.mkv']:
+        try:
+            size = path.stat().st_size
+            path.unlink()
+            removed.append(dict(path=str(path), bytes=size))
+        except FileNotFoundError:
+            continue
+        except OSError as error:
+            failures[str(path)] = f'{type(error).__name__}: {error}'
+    return dict(removed=removed, failures=failures)
+
+
+def run_video(baseline, directory, values, cli, video, session=None, replay=None, keep_intermediates=False):
     from art_processing import environment, without_baseline
 
     config = configuration(values)
@@ -37,7 +52,9 @@ def run_video(baseline, directory, values, cli, video, session=None, replay=None
         directory.mkdir(parents=True, exist_ok=False)
         record = dict(schema_version=3, run_id=str(uuid.uuid4()), status='running', result=None,
                       configuration=config, baseline=baseline, environment=snapshot, effective=effective,
-                      video_request=spec, source_sha256=source_hash, rng=manifest(config['settings']))
+                      video_request=spec, source_sha256=source_hash, rng=manifest(config['settings']),
+                      intermediates=dict(policy='keep' if keep_intermediates else 'delete after success'))
+        session.run_id, session.pass_count = record['run_id'], config['settings']['passes']
         path = directory / 'run.json'
         save_json(directory / 'recipe.json', config)
         save_json(path, record)
@@ -53,17 +70,23 @@ def run_video(baseline, directory, values, cli, video, session=None, replay=None
             if callback:
                 callback(event)
 
+        def persist():
+            record['timings'] = dict(sorted(session.timings.items()))
+            save_json(path, record)
+            # Same-name sidecar is authoritative even for failed/partial exports.
+            save_json(directory / ('result.json' if record['status'] == 'completed' else 'result.partial.json'), record)
+
         session.on_progress = report
         try:
-            progress('prepare-source')
-            prepared, timeline, tail = prepare(spec, directory, baseline)
+            progress('prepare')
+            prepared, timeline, tail = prepare(spec, directory, baseline, source_hash)
             record['prepare_seconds'] = time.perf_counter() - started
             record['prepared_source'] = prepared['source']
             record['source_timeline'] = timeline
             final_retain = spec['output_scale'] == 1 and config['settings']['retain'] != 0
             engine_settings = config['settings'] | ({'retain': 0} if final_retain else {})
             engine = execute(prepared, directory / 'work', engine_settings, cli,
-                             make_comparison=False, pin_tile=True)
+                             make_comparison=False, pin_tile=True, check_source=False)
             record['engine'] = without_baseline(engine)
             record['realized'] = dict(model=engine['model'], model_files=engine['runs'][0]['model_files'])
             original = prepared['prepared_input']['path'] if final_retain else None
@@ -80,9 +103,9 @@ def run_video(baseline, directory, values, cli, video, session=None, replay=None
                 record['replay'] = dict(parent_run_id=replay['run_id'], exact_frames_match=equal)
                 if not equal:
                     raise ValueError('Replay pre-encode frame hashes differ; A04 is not satisfied')
-            if sha256(Path(spec['source'])) != source_hash:
+            record['source_preserved'] = sha256(Path(spec['source'])) == source_hash
+            if not record['source_preserved']:
                 raise ValueError('Original source changed during processing')
-            progress('verified', len(timeline), len(timeline))
             checkpoint()
             pending = Path(delivery['pending'])
             record['result_sha256'] = sha256(pending)
@@ -101,7 +124,14 @@ def run_video(baseline, directory, values, cli, video, session=None, replay=None
             record['wall_seconds'] = time.perf_counter() - started
             if session.cancel_requested_at is not None:
                 record['cancel_response_seconds'] = time.perf_counter() - session.cancel_requested_at
-            save_json(path, record)
-            # Same-name sidecar is authoritative even for failed/partial exports.
-            save_json(directory / ('result.json' if record['status'] == 'completed' else 'result.partial.json'), record)
+            if record['status'] != 'completed':
+                if 'source_preserved' not in record:  # Checked after teardown so cancellation stays prompt.
+                    record['source_preserved'] = Path(spec['source']).is_file() and sha256(Path(spec['source'])) == source_hash
+                persist()
+                session.finish(record['status'])
+        persist()  # The completed record exists before any intermediate is removed.
+        if not keep_intermediates:
+            record['intermediates'] |= remove_intermediates(directory)
+            persist()
+        session.finish('completed')
         return record

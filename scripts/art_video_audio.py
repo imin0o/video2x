@@ -5,15 +5,17 @@ from fractions import Fraction
 
 import av
 
-from art_processing_session import checkpoint, progress
+from art_processing_session import checkpoint, progress, timed_iter
 
 
 def verify_audio(source, output, start, tail, origin, expected_streams):
     evidence = []
+    if expected_streams:
+        progress('verify-audio', 0, expected_streams, unit='streams')
     for index in range(expected_streams):
         count, first, last, digest, previous = 0, None, None, hashlib.sha256(), None
         with av.open(str(output)) as reader:
-            for frame in reader.decode(audio=index):
+            for frame in timed_iter(reader.decode(audio=index), 'verify_decode'):
                 checkpoint()
                 stamp = frame.pts * frame.time_base
                 if previous is not None and stamp < previous - Fraction(1, 1000):
@@ -26,7 +28,7 @@ def verify_audio(source, output, start, tail, origin, expected_streams):
         expected_count, expected_first, expected_last, source_end = 0, None, None, None
         with av.open(str(source)) as reader:
             sample_rate = reader.streams.audio[index].codec_context.sample_rate
-            for frame in reader.decode(audio=index):
+            for frame in timed_iter(reader.decode(audio=index), 'verify_decode'):
                 checkpoint()
                 stamp = frame.pts * frame.time_base - origin
                 # Matroska rounds audio packet PTS to ms; continuous samples retain their clock.
@@ -49,5 +51,5 @@ def verify_audio(source, output, start, tail, origin, expected_streams):
         evidence.append(dict(stream=index, samples=count, first_time=str(first), end_time=str(last),
                              pcm_sha256=digest.hexdigest(), source_samples=expected_count,
                              synchronized=True))
-        progress('verify-audio', index + 1, expected_streams)
+        progress('verify-audio', index + 1, expected_streams, unit='streams')
     return evidence

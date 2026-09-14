@@ -7,7 +7,7 @@ import av
 from art_experiment_frames import blend, frames, resize, signature, video_signature
 from art_experiment_run import FFMPEG
 from art_probe_support import command
-from art_processing_session import checkpoint, progress
+from art_processing_session import add_time, checkpoint, progress, timed
 from art_video_audio import verify_audio
 
 
@@ -16,8 +16,9 @@ def milliseconds(value):
 
 
 def export_video(result, spec, timeline, tail, directory, settings=None, original=None):
+    """Output time 0 is the requested start; frames play over their clipped display intervals."""
     start = Fraction(str(spec['start']))
-    pts = [milliseconds(Fraction(f['time']) - start) for f in timeline]
+    pts = [milliseconds(Fraction(f['display_start']) - start) for f in timeline]
     stop = milliseconds(tail - start)
     if any(b <= a for a, b in zip(pts, pts[1:] + [stop])):
         raise ValueError('Matroska 1ms time base cannot represent this interval without frame collisions')
@@ -39,27 +40,36 @@ def export_video(result, spec, timeline, tail, directory, settings=None, origina
                 frame = next(iterator, None)
                 if frame is None or frame.pts * frame.time_base != index:
                     raise ValueError('Inference frame missing or reordered before delivery')
-                pixels = resize(frame.to_ndarray(format='bgr24'), *size)
+                with timed('decode'):
+                    pixels = frame.to_ndarray(format='bgr24')
+                raw = next(reference, None) if reference is not None else None
                 if reference is not None:
-                    raw = next(reference, None)
                     if raw is None or raw.pts * raw.time_base != index:
                         raise ValueError('Original reference frame missing or reordered')
-                    pixels = blend(pixels, resize(raw.to_ndarray(format='bgr24'), *size), settings['retain'])
+                    with timed('decode'):
+                        raw = raw.to_ndarray(format='bgr24')
+                update = time.perf_counter()
+                pixels = resize(pixels, *size)
+                if reference is not None:
+                    pixels = blend(pixels, resize(raw, *size), settings['retain'])
                 out = av.VideoFrame.from_ndarray(pixels, format='bgr24')
                 out.pts, out.time_base = stamp, Fraction(1, 1000)
+                add_time('pixel', update)
                 durations[stamp] = next_stamp - stamp
                 evidence.append(signature(out))
-                for packet in stream.encode(out):
-                    packet.duration = durations[packet.pts]
-                    writer.mux(packet)
+                with timed('encode'):
+                    for packet in stream.encode(out):
+                        packet.duration = durations[packet.pts]
+                        writer.mux(packet)
                 progress('encode-output', index + 1, len(pts))
             if next(iterator, None) is not None:
                 raise ValueError('Inference produced extra frames')
             if reference is not None and next(reference, None) is not None:
                 raise ValueError('Original reference has extra frames')
-            for packet in stream.encode():
-                packet.duration = durations[packet.pts]
-                writer.mux(packet)
+            with timed('encode'):
+                for packet in stream.encode():
+                    packet.duration = durations[packet.pts]
+                    writer.mux(packet)
     finally:
         iterator.close()
         if reference is not None:
@@ -81,6 +91,7 @@ def export_video(result, spec, timeline, tail, directory, settings=None, origina
     started = time.perf_counter()
     command(invocation, directory / 'export.log')
     mux_seconds = time.perf_counter() - started
+    progress('verify-output')
     if video_signature(pending) != evidence:
         raise ValueError('Delivery changed pixels, timestamps, frame count or dimensions')
     with av.open(str(pending)) as reader:

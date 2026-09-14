@@ -19,6 +19,7 @@ from art_processing import run
 from art_processing_config import configuration, recipe
 from art_processing_session import Cancelled, Session
 from art_video_output import export_video
+from art_video_run import remove_intermediates
 from art_video_source import prepare, request
 
 BASELINE = dict(runs=[dict(effective=dict(tile=200, scale=2, prepadding=10, tta=False))])
@@ -64,7 +65,26 @@ class VideoTests(unittest.TestCase):
                       source_times=context['prepared_input']['source_times'])
             outputs.append({f['time']: s['sha256'] for f, s in zip(timeline, video_signature(folder / 'noise.mkv'), strict=True)})
         self.assertEqual(outputs[1], {k: v for k, v in outputs[0].items() if k in outputs[1]})
-        self.assertEqual(list(outputs[1]), ['71/1000', '119/1000', '153/1000'])
+        self.assertEqual(list(outputs[1]), ['33/1000', '71/1000', '119/1000', '153/1000'])
+        self.assertEqual((part[3][0]['display_start'], part[3][0]['display_end']), ('11/200', '71/1000'))
+
+    def test_adjacent_intervals_partition_full_display_time(self):
+        full = self.segment('whole', 0, .2)[3]
+        parts = self.segment('first', 0, .1)[3] + self.segment('second', .1, .2)[3]
+        merged = []
+        for frame in parts:
+            if merged and merged[-1]['time'] == frame['time'] and merged[-1]['display_end'] == frame['display_start']:
+                merged[-1]['display_end'] = frame['display_end']
+            else:
+                merged.append(dict(frame))
+        self.assertEqual(merged, full)
+        self.assertEqual([f['display_start'] for f in parts[:4]], ['0', '33/1000', '71/1000', '1/10'])
+
+    def test_sub_frame_interval_keeps_source_time_for_modulation(self):
+        _, _, context, timeline, tail = self.segment('short', .04, .06)
+        self.assertEqual([(f['time'], f['display_start'], f['display_end']) for f in timeline],
+                         [('33/1000', '1/25', '3/50')])
+        self.assertEqual((context['prepared_input']['source_times'], tail), (['33/1000'], Fraction(3, 50)))
 
     def test_depth_zero_is_fixed_and_legacy_depth_is_preserved(self):
         pixels = np.full((32, 64, 3), 128, dtype=np.uint8)
@@ -81,14 +101,14 @@ class VideoTests(unittest.TestCase):
         self.source = self.root / 'held.mkv'
         _, _, _, timeline, tail = self.segment('hold', 0, .15)
         self.assertEqual(tail, Fraction(15, 100))
-        self.assertEqual(timeline[0]['duration'], '3/20')
+        self.assertEqual(timeline[0]['display_end'], '3/20')
 
     def test_nonzero_container_origin_is_subtracted_once(self):
         fixture(self.root / 'offset.mkv', offset=2000)
         self.source = self.root / 'offset.mkv'
         _, spec, _, timeline, _ = self.segment('offset', .055, .154)
         self.assertEqual(spec['info']['origin'], '2')
-        self.assertEqual([f['time'] for f in timeline], ['71/1000', '119/1000', '153/1000'])
+        self.assertEqual([f['time'] for f in timeline], ['33/1000', '71/1000', '119/1000', '153/1000'])
 
     @unittest.skipUnless(FFMPEG.is_file(), 'bundled FFmpeg required')
     def test_equal_size_retain_one_recovers_exact_original_pixels(self):
@@ -110,11 +130,9 @@ class VideoTests(unittest.TestCase):
         error = Fraction(result['decoded_video_end_seconds']) - Fraction(result['video_end_seconds'])
         self.assertLessEqual(abs(error), Fraction(1, 1000))
 
-    def test_invalid_interval_rejected_and_empty_segment_detected(self):
+    def test_invalid_interval_rejected(self):
         for start, end in ((-1, 1), (1, 0), (0, float('nan')), (float('inf'), None), (2, None)):
             self.assertRaises(ValueError, request, self.source, start, end)
-        with self.assertRaisesRegex(ValueError, 'no video frame'):
-            self.segment('empty', .04, .06)
 
     @unittest.skipUnless(FFMPEG.is_file(), 'bundled FFmpeg required')
     def test_vfr_one_frame_tail_dimensions_pixels_and_audio_delivery(self):
@@ -131,7 +149,8 @@ class VideoTests(unittest.TestCase):
             self.assertEqual(len(actual), len(timeline))
             self.assertEqual((actual[0]['width'], actual[0]['height']), (64, 32))
             self.assertEqual([f['time'] for f in actual],
-                             [str(Fraction(f['time']) - Fraction(str(start))) for f in timeline])
+                             [str(Fraction(f['display_start']) - Fraction(str(start))) for f in timeline])
+            self.assertEqual(actual[0]['time'], '0')  # The straddling frame starts at the requested start.
             self.assertEqual(delivery['audio_streams'][0]['codec'], 'pcm_f32le')
             with av.open(delivery['pending']) as reader:
                 decoded = list(reader.decode(audio=0))
@@ -139,20 +158,38 @@ class VideoTests(unittest.TestCase):
             self.assertLessEqual(abs(float(decoded[0].pts * decoded[0].time_base)), 1 / 1000)
             samples = sum(f.samples for f in decoded)
             self.assertLessEqual(abs(samples / 48000 - float(tail - Fraction(str(start)))), 1 / 48000)
+        with self.assertRaisesRegex(ValueError, 'no video frame'):  # Audio-only time is not filled with video.
+            self.segment('empty', .25, .3)
 
     def test_m3_cancellation_and_failure_leave_records_and_release_session(self):
         for index, error in enumerate((Cancelled('stop'), MemoryError('simulated GPU allocation failure'))):
-            folder = self.root / str(index)
-            session = Session()
+            folder, events = self.root / str(index), []
+            session = Session(on_progress=events.append)
             with patch('art_video_run.validate_baseline'), patch('art_processing.environment', return_value={}), \
                     patch('art_video_run.prepare', side_effect=error), self.assertRaises(type(error)):
                 run(copy.deepcopy(BASELINE), folder, {}, 'cli.exe', video=request(self.source), session=session)
             record = json.loads((folder / 'run.json').read_text())
             self.assertEqual(record['status'], 'failed' if index else 'cancelled')
             self.assertIsNone(record['result'])
+            self.assertTrue(record['source_preserved'])
             self.assertFalse((folder / 'result.mkv').exists() or session.active)
-            with Session():
-                pass
+            self.assertEqual([(e['stage'], e['state']) for e in events], [('prepare', 'running'), ('prepare', record['status'])])
+            self.assertEqual((events[-1]['run_id'], events[-1]['pass_count']), (record['run_id'], 1))
+            self.assertRaises(RuntimeError, session.__enter__)
+
+    def test_success_removes_only_generated_intermediate_videos(self):
+        folder = self.root / 'done'
+        for name in ('work/pass-1.mkv', 'work/injected.mkv', 'video.partial.mkv', 'input.mkv', 'work/run.json'):
+            (folder / name).parent.mkdir(parents=True, exist_ok=True)
+            (folder / name).write_bytes(b'x')
+        outcome = remove_intermediates(folder)
+        self.assertEqual(sorted(Path(r['path']).name for r in outcome['removed']),
+                         ['injected.mkv', 'pass-1.mkv', 'video.partial.mkv'])
+        self.assertTrue((folder / 'input.mkv').is_file() and (folder / 'work/run.json').is_file())
+        self.assertEqual(outcome['failures'], {})
+        with self.assertRaisesRegex(ValueError, 'M3 video runs'):
+            run(copy.deepcopy(BASELINE), self.root / 'm2', {}, 'cli.exe', keep_intermediates=True)
+        self.assertFalse((self.root / 'm2').exists())
 
 
 if __name__ == '__main__':

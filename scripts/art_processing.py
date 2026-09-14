@@ -66,14 +66,17 @@ def without_baseline(engine):
     return {key: value for key, value in engine.items() if key != 'baseline'}
 
 
-def run(baseline, directory, values, cli, session=None, replay=None, video=None):
+def run(baseline, directory, values, cli, session=None, replay=None, video=None, keep_intermediates=False):
     """All input validation precedes output creation. Each pass uses a fresh CLI process."""
     config = configuration(values)
     if replay is not None:
         completed_run(replay)
     if video is not None or (replay and replay['schema_version'] == 3):
         from art_video_run import run_video
-        return run_video(baseline, directory, values, cli, video or replay['video_request'], session, replay)
+        return run_video(baseline, directory, values, cli, video or replay['video_request'], session, replay,
+                         keep_intermediates)
+    if keep_intermediates:
+        raise ValueError('M2 runs always keep intermediates; the option applies to M3 video runs')
     baseline = copy.deepcopy(baseline)
     cli, directory = Path(cli).resolve(), Path(directory).resolve()
     session = session or Session()
@@ -95,6 +98,7 @@ def run(baseline, directory, values, cli, session=None, replay=None, video=None)
                       rng=manifest(config['settings']), effective=effective,
                       isolation='fresh model bytes and child GPU process per pass; no model cache',
                       result=None)
+        session.run_id, session.pass_count = record['run_id'], config['settings']['passes']
         path = directory / 'run.json'
         save_json(directory / 'recipe.json', config)
         save_json(path, record)
@@ -126,5 +130,7 @@ def run(baseline, directory, values, cli, session=None, replay=None, video=None)
                 record['engine'] = without_baseline(json.loads(engine_path.read_text(encoding='utf-8')))
             raise
         finally:
+            record['timings'] = dict(sorted(session.timings.items()))
             save_json(path, record)
+            session.finish(record['status'])
         return record

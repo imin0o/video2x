@@ -14,8 +14,7 @@ import PIL
 from art_experiment_frames import transform, video_signature
 from art_experiment_model import MODEL_HASHES, model_copy, recipe
 from art_model_inspect import MODEL, ROOT, sha256
-from art_probe_support import (binary_inventory, command, decoded_hashes, parse_diagnostics,
-                               sampled_run, save_json)
+from art_probe_support import binary_inventory, command, parse_diagnostics, sampled_run, save_json
 from art_processing_session import is_cancellation, progress
 
 FFMPEG = ROOT / 'third_party/ffmpeg-shared/bin/ffmpeg.exe'
@@ -88,7 +87,8 @@ def comparison(baseline, candidate, directory, input_blur_control=None):
                 layout=labels, display_width_per_panel=640, blur_control=str(blur))
 
 
-def execute(baseline, directory, settings, cli, make_comparison=True, pin_tile=False):
+def execute(baseline, directory, settings, cli, make_comparison=True, pin_tile=False, check_source=True):
+    """check_source=False only when the caller hashes the original before and after this call."""
     settings = recipe(settings)
     directory.mkdir(parents=True, exist_ok=False)
     record = dict(schema_version=1, status='running', recipe=settings,
@@ -112,7 +112,8 @@ def execute(baseline, directory, settings, cli, make_comparison=True, pin_tile=F
         base, record['model'] = model_copy(directory / 'models/realesrgan', settings)
         record['model_prepare_ms'] = (time.perf_counter() - model_start) * 1000
         clip = Path(baseline['prepared_input']['path'])
-        source_frames = video_signature(clip)
+        # M3 preparation already decode-verified this clip; M0/M1 clips are decoded here.
+        source_frames = baseline['prepared_input'].get('frames') or video_signature(clip)
         baseline_run = baseline['runs'][0]
         input_path = clip
         if settings['input_noise'] or settings['input_blur']:
@@ -125,8 +126,8 @@ def execute(baseline, directory, settings, cli, make_comparison=True, pin_tile=F
         for index in range(settings['passes']):
             if index:
                 input_path = directory / 'reinput.mkv'
-                record['transformations'].append(transform(directory / 'pass-1.mkv', input_path, recipe({}),
-                                                           output_size=size, stage='resize'))
+                record['transformations'].append(transform(directory / 'pass-1.mkv', input_path, recipe({}), output_size=size,
+                                                           stage='resize', total=len(source_frames), pass_index=index + 1))
             output = directory / f'pass-{index + 1}.mkv'
             pending = output.with_suffix('.partial.mkv')
             invocation = [cli, '-i', input_path, '-o', pending, '-p', 'realesrgan',
@@ -140,18 +141,19 @@ def execute(baseline, directory, settings, cli, make_comparison=True, pin_tile=F
             model_files = resolved_model(working_directory, base, expected)
             tile = baseline_run['effective']['tile'] if pin_tile else None
             overrides = {} if tile is None else {'VIDEO2X_ART_TILE': str(tile)}
-            progress(f'inference-pass-{index + 1}', 0, len(source_frames))
-            measurements = sampled_run(invocation, log, directory / f'gpu-{index + 1}.csv',
-                                       cwd=working_directory, tile=tile)
+            inference = dict(total=len(source_frames), pass_index=index + 1)
+            progress('inference', 0, **inference)
+            measurements = sampled_run(invocation, log, directory / f'gpu-{index + 1}.csv', cwd=working_directory,
+                                       tile=tile, on_frames=lambda done: progress('inference', done, **inference))
             diagnostics = parse_diagnostics(log)
-            progress(f'inference-pass-{index + 1}', len(diagnostics['pre_encode_frames']), len(source_frames))
+            progress('inference', len(diagnostics['pre_encode_frames']), **inference)
             for key in ('gpu', 'tile', 'scale', 'prepadding', 'tta', 'precision'):
                 if diagnostics['effective'][key] != baseline_run['effective'][key]:
                     raise ValueError(f'Effective {key} differs from baseline')
-            hashes = decoded_hashes(FFMPEG, pending, directory / f'decoded-{index + 1}.sha256')
-            if hashes != [f['sha256'] for f in diagnostics['pre_encode_frames']]:
+            progress('verify-inference', pass_index=index + 1)
+            actual = video_signature(pending)  # One decode checks pixels, times, count and dimensions.
+            if [f['sha256'] for f in actual] != [f['sha256'] for f in diagnostics['pre_encode_frames']]:
                 raise ValueError('Decoded output differs from pre-encode pixels')
-            actual = video_signature(pending)
             if (len(actual) != len(source_frames)
                     or [f['time'] for f in actual] != [f['time'] for f in source_frames]
                     or any((f['width'], f['height']) != (size[0] * 2, size[1] * 2) for f in actual)):
@@ -164,12 +166,14 @@ def execute(baseline, directory, settings, cli, make_comparison=True, pin_tile=F
         result = output
         if settings['output_blur'] or settings['retain'] or settings.get('source_color', 0):
             result = directory / 'result.mkv'
-            record['transformations'].append(transform(output, result, settings, original=clip, stage='output'))
+            record['transformations'].append(transform(output, result, settings, original=clip, stage='output',
+                                                       total=len(source_frames)))
         record['verification'] = dict(frame_count=len(source_frames), tail_time=source_frames[-1]['time'],
                                       output_dimensions=[size[0] * 2, size[1] * 2],
                                       frames_times_dimensions_and_lossless_pixels=True,
                                       first_pass_matches_baseline=(record['runs'][0]['pre_encode_frames']
-                                                                  == baseline_run['pre_encode_frames']))
+                                                                  == baseline_run['pre_encode_frames'])
+                                      if baseline_run['pre_encode_frames'] else None)
         if make_comparison:
             control = directory / 'injected.mkv' if settings['input_blur'] and not settings['input_noise'] else None
             record['comparison'] = comparison(baseline, result, directory, control)
@@ -182,8 +186,9 @@ def execute(baseline, directory, settings, cli, make_comparison=True, pin_tile=F
                                   for p in directory.glob('pass-*.log')}
         raise
     finally:
-        preserved = (sha256(Path(baseline['source']['path'])) == baseline['source']['sha256']
+        preserved = ((not check_source or sha256(Path(baseline['source']['path'])) == baseline['source']['sha256'])
                      and tuple(sha256(MODEL.with_suffix(x)) for x in ('.param', '.bin')) == MODEL_HASHES)
+        record['source_integrity'] = 'checked by engine' if check_source else 'checked by caller'
         record['original_hashes_preserved'] = preserved
         if not preserved:
             record['status'], record['error'] = 'failed', 'Original input/model integrity check failed'

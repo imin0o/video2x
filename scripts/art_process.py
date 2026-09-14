@@ -1,6 +1,7 @@
 """M2: execute portable recipes, migrate M1 settings, or replay a saved video run."""
 import argparse
 import json
+import signal
 import sys
 import time
 from pathlib import Path
@@ -27,6 +28,8 @@ def main():
     parser.add_argument('--end', type=float, help='Exclusive source end time; omitted means end of video')
     parser.add_argument('--output-scale', type=int, choices=(1, 2))
     parser.add_argument('--audio', choices=('pcm', 'omit'), help='Default: sample-trimmed PCM audio')
+    parser.add_argument('--keep-intermediates', action='store_true',
+                        help='M3: keep intermediate videos after success (failed/cancelled runs always keep them)')
     parser.add_argument('--cli', type=Path, default=ROOT / 'build/art/install/bin/video2x.exe')
     for key, default in DEFAULTS.items():
         if key == 'version':
@@ -41,7 +44,7 @@ def main():
     video_options = any(getattr(args, k) is not None for k in ('input', 'start', 'end', 'output_scale', 'audio'))
     if args.replay and (overrides or args.baseline_dir or args.save_recipe or video_options):
         parser.error('--replay uses saved settings and input; overrides are not allowed')
-    if args.save_recipe and (args.output_dir or args.baseline_dir or video_options):
+    if args.save_recipe and (args.output_dir or args.baseline_dir or video_options or args.keep_intermediates):
         parser.error('--save-recipe does not process; --output-dir and --baseline-dir are not used')
     if not args.save_recipe and not args.output_dir:
         parser.error('--output-dir is required for processing')
@@ -64,17 +67,26 @@ def main():
         video = request(args.input, args.start or 0, args.end, args.output_scale or 2, args.audio or 'pcm') if args.input else None
     except (OSError, ValueError, KeyError) as error:
         parser.error(f'{type(error).__name__}: {error}')
-    last_report = 0
+    last_report, last_stage = 0, None
 
     def report(event):
-        nonlocal last_report
-        if time.monotonic() - last_report >= 1:
+        nonlocal last_report, last_stage
+        # Stage switches and terminal events are never throttled.
+        if event['state'] != 'running' or event['stage'] != last_stage or time.monotonic() - last_report >= 1:
             print(json.dumps(event), file=sys.stderr, flush=True)
-            last_report = time.monotonic()
+            last_report, last_stage = time.monotonic(), event['stage']
 
+    session = Session(on_progress=report)
+
+    def interrupt(*unused):
+        if session.cancelled.is_set():
+            raise KeyboardInterrupt  # Second Ctrl+C: stop waiting for cooperative teardown.
+        session.cancel()
+
+    signal.signal(signal.SIGINT, interrupt)
     try:
         result = run(baseline, args.output_dir, config, args.cli, replay=replay, video=video,
-                     session=Session(on_progress=report))
+                     session=session, keep_intermediates=args.keep_intermediates)
     except (Cancelled, KeyboardInterrupt):
         print(f'Cancelled; record: {args.output_dir / "run.json"}', file=sys.stderr)
         raise SystemExit(130) from None

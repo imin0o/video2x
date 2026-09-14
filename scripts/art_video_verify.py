@@ -43,6 +43,10 @@ def verify(baseline_dir, output, cli):
             if actual != {k: v for k, v in expected.items() if k in actual}:
                 raise AssertionError('A05 inference hashes differ')
         report['checks']['A05_full_preview_exact'] = True
+        if (any((output / 'full' / name).exists() for name in ('video.partial.mkv', 'work/pass-1.mkv', 'work/injected.mkv'))
+                or full['intermediates']['failures'] or not (output / 'full/input.mkv').is_file()):
+            raise AssertionError('Successful run kept intermediate videos or removed evidence')
+        report['checks']['B_intermediates_removed_after_success'] = True
         print('Single-frame export and original-size delivery', flush=True)
         single = run(baseline, output / 'single', settings, cli, video=request(source, 0, .01, 1))
         if len(single['final_frames']) != 1:
@@ -71,8 +75,10 @@ def verify(baseline_dir, output, cli):
         if indexed(preview) != {k: v for k, v in indexed(vfr).items() if k in indexed(preview)}:
             raise AssertionError('VFR two-pass preview differs')
         tail = run(baseline, output / 'tail', small, cli, video=request(media, .965, .97, 1))
-        if len(tail['final_frames']) != 1 or Fraction(tail['delivery']['video_end_seconds']) != Fraction(5, 1000):
-            raise AssertionError('Short final frame duration differs')
+        # The .9 frame straddles .965 and is clipped; the .967 frame is clipped at .97.
+        if (len(tail['final_frames']) != 2 or Fraction(tail['source_timeline'][0]['display_start']) != Fraction(193, 200)
+                or Fraction(tail['delivery']['video_end_seconds']) != Fraction(5, 1000)):
+            raise AssertionError('Straddling head or short final frame duration differs')
         report['checks']['VFR_audio_tail_two_pass_equal_size'] = True
         for name, cancelled in (('cancelled', True), ('failed', False)):
             session = Session()
@@ -97,8 +103,9 @@ def verify(baseline_dir, output, cli):
                 else:
                     raise AssertionError('Failure/cancellation was not exercised')
             failed = json.loads((output / name / 'run.json').read_text(encoding='utf-8'))
-            if failed['status'] != name or failed['result'] is not None or not failed['engine']['original_hashes_preserved']:
-                raise AssertionError('Failure lifecycle or source preservation differs')
+            if (failed['status'] != name or failed['result'] is not None or not failed['source_preserved']
+                    or not failed['engine']['original_hashes_preserved'] or not (output / name / 'work/injected.mkv').is_file()):
+                raise AssertionError('Failure lifecycle, kept intermediates or source preservation differs')
             report[name] = dict(error=failed['error'], response_seconds=failed.get('cancel_response_seconds'))
             run(baseline, output / f'after-{name}', small, cli, replay=vfr)
         report['checks']['A08_A10_cancel_failure_recovery'] = True
@@ -107,6 +114,7 @@ def verify(baseline_dir, output, cli):
                         output / 'vfr/run.json', '--output-dir', output / 'restart', '--cli', cli], check=True)
         report['checks']['restart_video_audio_exact'] = load_run(output / 'restart/run.json')['replay']['exact_frames_match']
         report['performance'] = {name: dict(wall_seconds=r['wall_seconds'], prepare_seconds=r['prepare_seconds'],
+                                    timings=r['timings'],
                                     delivery_seconds=r['delivery']['encode_seconds'] + r['delivery']['audio_mux_seconds'],
                                     runs=[{k: p[k] for k in ('model_load_ms', 'first_frame_inference_ms',
                                           'reused_frame_mean_ms', 'measurements')} for p in r['engine']['runs']])
