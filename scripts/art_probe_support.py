@@ -1,6 +1,7 @@
 """Process execution, runtime measurements and comparison assets for the M0 probe."""
 import csv
 import json
+import os
 import re
 import shutil
 import statistics
@@ -10,6 +11,8 @@ from pathlib import Path
 
 from art_model_inspect import ROOT, sha256
 from art_processing_session import run_process
+
+TILE_VARIABLE = 'VIDEO2X_ART_TILE'
 
 
 def command(args, log=None, cwd=ROOT, env=None):
@@ -34,7 +37,11 @@ def media_info(ffprobe, path):
                                '-show_streams', '-show_format', '-of', 'json', path]))
 
 
-def sampled_run(args, log, samples, cwd=ROOT, env=None):
+def sampled_run(args, log, samples, cwd=ROOT, tile=None):
+    # A leftover shell value must not pin tiles silently; only an explicit request sets it.
+    env = {key: value for key, value in os.environ.items() if key.upper() != TILE_VARIABLE}
+    if tile is not None:
+        env[TILE_VARIABLE] = str(tile)
     monitor = None
     started = time.perf_counter()
     smi = shutil.which('nvidia-smi')

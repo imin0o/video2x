@@ -54,7 +54,9 @@ def blend(pixels, original, retain):
 
 def frames(path):
     with av.open(str(path)) as container:
-        yield from container.decode(video=0)
+        for frame in container.decode(video=0):
+            checkpoint()  # Full-clip signatures stay cancellable between frames.
+            yield frame
 
 
 def signature(frame):

@@ -28,25 +28,35 @@ def main():
     args = parser.parse_args()
     overrides = {key: getattr(args, key) for key in DEFAULTS if key != 'version' and getattr(args, key) is not None}
     if 'weight_layers' in overrides:
-        overrides['weight_layers'] = overrides['weight_layers'].split(',')
+        overrides['weight_layers'] = [layer.strip() for layer in overrides['weight_layers'].split(',')]
     if args.replay and (overrides or args.baseline_dir or args.save_recipe):
         parser.error('--replay uses saved settings and input; overrides are not allowed')
+    if args.save_recipe and (args.output_dir or args.baseline_dir):
+        parser.error('--save-recipe does not process; --output-dir and --baseline-dir are not used')
     if not args.save_recipe and not args.output_dir:
         parser.error('--output-dir is required for processing')
-    if args.save_recipe and args.output_dir:
-        parser.error('--save-recipe and --output-dir are mutually exclusive')
-    replay = load_run(args.replay) if args.replay else None
-    config = replay['configuration'] if replay else configuration(json.loads(args.recipe.read_text(encoding='utf-8')))
-    config = configuration(config | dict(settings=config['settings'] | overrides))
-    if args.save_recipe:
-        # Never overwrite a source recipe or an existing saved recipe.
-        with args.save_recipe.open('x', encoding='utf-8') as output:
-            json.dump(config, output, indent=2, ensure_ascii=False)
-        return
-    if not replay and not args.baseline_dir:
+    if args.recipe and not args.save_recipe and not args.baseline_dir:
         parser.error('--baseline-dir is required with --recipe')
-    baseline = replay['baseline'] if replay else baseline_context(args.baseline_dir.resolve(), args.cli.resolve())
-    result = run(baseline, args.output_dir, config, args.cli, replay=replay)
+    if args.output_dir and args.output_dir.exists():
+        parser.error('--output-dir must name a new directory')
+    try:
+        replay = load_run(args.replay) if args.replay else None
+        config = replay['configuration'] if replay else configuration(json.loads(args.recipe.read_text(encoding='utf-8')))
+        config = configuration(config | dict(settings=config['settings'] | overrides))
+        if args.save_recipe:
+            # Never overwrite a source recipe or an existing saved recipe.
+            with args.save_recipe.open('x', encoding='utf-8') as output:
+                json.dump(config, output, indent=2, ensure_ascii=False)
+            return
+        baseline = replay['baseline'] if replay else baseline_context(args.baseline_dir.resolve(), args.cli.resolve())
+    except (OSError, ValueError, KeyError) as error:
+        parser.error(f'{type(error).__name__}: {error}')
+    try:
+        result = run(baseline, args.output_dir, config, args.cli, replay=replay)
+    except (OSError, ValueError) as error:
+        if args.output_dir.exists():
+            raise  # Processing started; run.json records the failure.
+        parser.error(f'{type(error).__name__}: {error}')
     save_json(args.output_dir / 'result.json', dict(video=result['result'], run=str((args.output_dir / 'run.json').resolve())))
     print(f'Verified video: {result["result"]}', flush=True)
 

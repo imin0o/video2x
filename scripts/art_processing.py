@@ -1,43 +1,69 @@
 """Common M2 execution API for CLI and future GUI; no shared mutable model/GPU cache."""
+import ast
 import copy
 import json
-import platform
-import sys
 import uuid
 from pathlib import Path
 
-import av
-import numpy as np
-import PIL
-
 from art_experiment_frames import video_signature
-from art_experiment_run import execute, validate_baseline
+from art_experiment_run import execute, software_environment, validate_baseline
 from art_model_inspect import ROOT, sha256
 from art_probe_support import binary_inventory, gpu_inventory, save_json
 from art_processing_config import configuration
 from art_processing_rng import manifest
-from art_processing_session import Session, checkpoint
+from art_processing_session import Session, checkpoint, is_cancellation
+
+
+def processing_scripts():
+    """Import closure of this API; CLI, probe and verification edits keep saved runs replayable."""
+    found, pending = {}, [Path(__file__).stem]
+    while pending:
+        name = pending.pop()
+        path = ROOT / 'scripts' / f'{name}.py'
+        if name in found or not name.startswith('art_') or not path.is_file():
+            continue
+        found[name] = path
+        for node in ast.walk(ast.parse(path.read_text(encoding='utf-8'))):
+            if isinstance(node, ast.ImportFrom) and node.module:
+                pending.append(node.module)
+            elif isinstance(node, ast.Import):
+                pending += [alias.name for alias in node.names]
+    return list(found.values())
 
 
 def environment(cli):
-    return dict(os=platform.platform(), python=sys.version, numpy=np.__version__,
-                pyav=av.__version__, pillow=PIL.__version__, gpu=gpu_inventory(),
-                binaries=binary_inventory(cli),
-                scripts={p.name: sha256(p) for p in (ROOT / 'scripts').glob('art_*.py')})
+    return software_environment(processing_scripts()) | dict(gpu=gpu_inventory(),
+                                                             binaries=binary_inventory(cli))
 
 
-def load_run(path):
-    record = json.loads(Path(path).read_text(encoding='utf-8'))
-    if (type(record.get('schema_version')) is not int or record['schema_version'] != 2
-            or record.get('status') != 'completed'):
+def completed_run(record):
+    """Reject partial or malformed records before any output or GPU work."""
+    engine = record.get('engine') if isinstance(record, dict) else None
+    runs = engine.get('runs') if isinstance(engine, dict) else None
+    if (not isinstance(runs, list) or not runs
+            or any(not isinstance(r, dict) or 'pre_encode_frames' not in r for r in runs)
+            or type(record.get('schema_version')) is not int or record['schema_version'] != 2
+            or record.get('status') != 'completed' or not isinstance(record.get('final_frames'), list)
+            or not {'run_id', 'configuration', 'baseline', 'environment'} <= record.keys()):
         raise ValueError('Replay needs a completed M2 run.json')
     configuration(record['configuration'])
     return record
 
 
+def load_run(path):
+    return completed_run(json.loads(Path(path).read_text(encoding='utf-8')))
+
+
+def without_baseline(engine):
+    # The run record embeds the M0 baseline once at top level.
+    return {key: value for key, value in engine.items() if key != 'baseline'}
+
+
 def run(baseline, directory, values, cli, session=None, replay=None):
     """All input validation precedes output creation. Each pass uses a fresh CLI process."""
     config = configuration(values)
+    if replay is not None:
+        completed_run(replay)
     baseline = copy.deepcopy(baseline)
     cli, directory = Path(cli).resolve(), Path(directory).resolve()
     session = session or Session()
@@ -49,11 +75,9 @@ def run(baseline, directory, values, cli, session=None, replay=None):
                 or effective['scale'] != 2 or effective['prepadding'] != 10 or effective['tta']):
             raise ValueError('Unsupported inference settings')
         snapshot = environment(cli)
-        if replay is not None:
-            if (replay.get('schema_version') != 2 or replay.get('status') != 'completed'
-                    or config != replay['configuration'] or baseline != replay['baseline']
-                    or snapshot != replay['environment']):
-                raise ValueError('Replay recipe, input or environment differs from the saved run')
+        if replay is not None and (config != replay['configuration'] or baseline != replay['baseline']
+                                   or snapshot != replay['environment']):
+            raise ValueError('Replay recipe, input or environment differs from the saved run')
         checkpoint()
         directory.mkdir(parents=True, exist_ok=False)
         record = dict(schema_version=2, run_id=str(uuid.uuid4()), status='running',
@@ -69,13 +93,12 @@ def run(baseline, directory, values, cli, session=None, replay=None):
             engine = execute(baseline, directory / 'work', config['settings'], cli,
                              make_comparison=False, pin_tile=True)
             checkpoint()
-            record['engine'] = engine
+            record['engine'] = without_baseline(engine)
             record['result'] = engine['result']
             record['result_sha256'] = sha256(Path(engine['result']))
             record['final_frames'] = video_signature(engine['result'])
-            record['realized'] = dict(model=engine['model'],
-                                     model_files=engine['runs'][0]['model_files'],
-                                     settings=copy.deepcopy(config['settings']))
+            # Feature draws are in model.feature; weight draws live in the hashed model files.
+            record['realized'] = dict(model=engine['model'], model_files=engine['runs'][0]['model_files'])
             if replay is not None:
                 matches = (record['final_frames'] == replay['final_frames']
                            and [r['pre_encode_frames'] for r in engine['runs']]
@@ -86,11 +109,11 @@ def run(baseline, directory, values, cli, session=None, replay=None):
             checkpoint()
             record['status'] = 'completed'
         except BaseException as error:
-            record['status'] = 'cancelled' if isinstance(error, KeyboardInterrupt) else 'failed'
+            record['status'] = 'cancelled' if is_cancellation(error) else 'failed'
             record['error'] = f'{type(error).__name__}: {error}'
             engine_path = directory / 'work/run.json'
-            if engine_path.is_file():
-                record['engine'] = json.loads(engine_path.read_text(encoding='utf-8'))
+            if 'engine' not in record and engine_path.is_file():
+                record['engine'] = without_baseline(json.loads(engine_path.read_text(encoding='utf-8')))
             raise
         finally:
             save_json(path, record)

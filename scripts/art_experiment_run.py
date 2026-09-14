@@ -1,6 +1,5 @@
 """Execute and verify one M1 candidate against a completed M0 baseline."""
 import json
-import os
 import platform
 import re
 import shutil
@@ -17,8 +16,16 @@ from art_experiment_model import MODEL_HASHES, model_copy, recipe
 from art_model_inspect import MODEL, ROOT, sha256
 from art_probe_support import (binary_inventory, command, decoded_hashes, parse_diagnostics,
                                sampled_run, save_json)
+from art_processing_session import is_cancellation
 
 FFMPEG = ROOT / 'third_party/ffmpeg-shared/bin/ffmpeg.exe'
+
+
+def software_environment(scripts=None):
+    scripts = (ROOT / 'scripts').glob('art_*.py') if scripts is None else scripts
+    return dict(os=platform.platform(), python=sys.version, numpy=np.__version__,
+                pyav=av.__version__, pillow=PIL.__version__,
+                scripts={path.name: sha256(path) for path in scripts})
 
 
 def baseline_context(directory, cli):
@@ -86,9 +93,7 @@ def execute(baseline, directory, settings, cli, make_comparison=True, pin_tile=F
     directory.mkdir(parents=True, exist_ok=False)
     record = dict(schema_version=1, status='running', recipe=settings,
                   baseline=baseline, runs=[], transformations=[],
-                  environment=dict(os=platform.platform(), python=sys.version, numpy=np.__version__,
-                                   pyav=av.__version__, pillow=PIL.__version__,
-                                   scripts={p.name: sha256(p) for p in (ROOT / 'scripts').glob('art_*.py')}),
+                  environment=software_environment(),
                   semantics=dict(rng='SHA256 domains + NumPy PCG64, m1-pcg64-v1',
                                  input_noise='normal, independent BGR, sigma in 8-bit levels; rint then clip',
                                  features='64 channel-constant normal biases, attenuation or seeded channel mask',
@@ -130,9 +135,10 @@ def execute(baseline, directory, settings, cli, make_comparison=True, pin_tile=F
             working_directory = directory if index == 0 else ROOT
             expected = (record['model']['param_sha256'], record['model']['binary_sha256']) if index == 0 else MODEL_HASHES
             model_files = resolved_model(working_directory, base, expected)
-            overrides = {'VIDEO2X_ART_TILE': str(baseline_run['effective']['tile'])} if pin_tile else {}
+            tile = baseline_run['effective']['tile'] if pin_tile else None
+            overrides = {} if tile is None else {'VIDEO2X_ART_TILE': str(tile)}
             measurements = sampled_run(invocation, log, directory / f'gpu-{index + 1}.csv',
-                                       cwd=working_directory, env=os.environ | overrides)
+                                       cwd=working_directory, tile=tile)
             diagnostics = parse_diagnostics(log)
             for key in ('gpu', 'tile', 'scale', 'prepadding', 'tta', 'precision'):
                 if diagnostics['effective'][key] != baseline_run['effective'][key]:
@@ -165,7 +171,7 @@ def execute(baseline, directory, settings, cli, make_comparison=True, pin_tile=F
         record['result'] = str(result)
         record['status'] = 'completed'
     except BaseException as error:
-        record['status'] = 'cancelled' if isinstance(error, KeyboardInterrupt) else 'failed'
+        record['status'] = 'cancelled' if is_cancellation(error) else 'failed'
         record['error'] = f'{type(error).__name__}: {error}'
         raise
     finally:

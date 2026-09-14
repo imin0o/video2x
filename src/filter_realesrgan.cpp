@@ -1,11 +1,11 @@
 #include "filter_realesrgan.h"
 
-#include <chrono>
 #include <charconv>
-#include <cstdlib>
-#include <cstring>
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <filesystem>
 
 #include <spdlog/spdlog.h>
@@ -42,7 +42,15 @@ FilterRealesrgan::~FilterRealesrgan() {
 
 int FilterRealesrgan::init(AVCodecContext* dec_ctx, AVCodecContext* enc_ctx, AVBufferRef*) {
     int pinned_tile = 0;
-    if (const char* value = std::getenv("VIDEO2X_ART_TILE")) {
+#ifdef _MSC_VER
+#pragma warning(push)
+#pragma warning(disable : 4996)  // Read once during init; no concurrent environment writes.
+#endif
+    const char* value = std::getenv("VIDEO2X_ART_TILE");
+#ifdef _MSC_VER
+#pragma warning(pop)
+#endif
+    if (value) {
         const char* end = value + std::strlen(value);
         const auto parsed = std::from_chars(value, end, pinned_tile);
         if (parsed.ec != std::errc{} || parsed.ptr != end ||
@@ -118,7 +126,12 @@ int FilterRealesrgan::init(AVCodecContext* dec_ctx, AVCodecContext* enc_ctx, AVB
     } else {
         realesrgan_->tilesize = 32;
     }
-    if (pinned_tile) realesrgan_->tilesize = pinned_tile;
+    if (pinned_tile) {
+        // Art replay only: the value bypasses the heap-budget choice, so make it visible in every log.
+        logger()->warn("VIDEO2X_ART_TILE pins tile size to {} (heap budget chose {})",
+            pinned_tile, realesrgan_->tilesize);
+        realesrgan_->tilesize = pinned_tile;
+    }
     logger()->debug("[art-baseline] gpu={} heap_budget_mb={} tile={} scale={} prepadding={} tta={}",
         gpuid_, heap_budget, realesrgan_->tilesize, realesrgan_->scale,
         realesrgan_->prepadding, tta_mode_);

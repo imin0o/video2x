@@ -30,7 +30,8 @@ def verify(baseline_dir, output, cli, legacy):
         print('B: independent input/weight/feature effects and two passes', flush=True)
         other = dict(seed=19, weight_strength=0.4, input_noise=3, feature_strength=0.2,
                      feature_mode='mask', passes=2, time_mode='smooth-constant')
-        run(baseline, output / 'b', other, cli)
+        if run(baseline, output / 'b', other, cli)['final_frames'] == first['final_frames']:
+            raise AssertionError('B did not change the output; A/B/A would be vacuous')
         print('A again in the same host process', flush=True)
         run(baseline, output / 'a-again', configs['melt-16'], cli, replay=first)
         report['checks']['A_B_A'] = True

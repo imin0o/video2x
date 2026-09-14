@@ -6,8 +6,12 @@ import threading
 _CURRENT = contextvars.ContextVar('art_execution', default=None)
 
 
-class Cancelled(KeyboardInterrupt):
-    """Cooperative cancellation, also recorded by the legacy pipeline."""
+class Cancelled(Exception):
+    """Cooperative cancellation; not a KeyboardInterrupt, so GUI/asyncio loops do not treat it as Ctrl+C."""
+
+
+def is_cancellation(error):
+    return isinstance(error, (KeyboardInterrupt, Cancelled))
 
 
 class Session:

@@ -34,7 +34,7 @@ def model_copy(directory, settings):
             raise ValueError('Mutated weight exceeds its finite encoding range')
         data[offset:offset + size] = values.astype(dtype).tobytes()
     text = original_param.read_text(encoding='utf-8')
-    feature_strength = settings['feature_strength']
+    feature_strength, feature = settings['feature_strength'], None
     if feature_strength:
         # A real intermediate operation after PReLU, before the following convolution.
         # Channel noise/masks are spatially constant, including tile overlap/padding.
@@ -60,7 +60,10 @@ def model_copy(directory, settings):
             scales = (random.random(64) >= feature_strength).astype(float)
         prior = {x['name'] for x in inventory['layers'][:line_index - 1]}
         end = max(t['offset'] + t['bytes'] for t in inventory['tensors'] if t['layer'] in prior)
-        data[end:end] = scales.astype('<f4').tobytes() + biases.astype('<f4').tobytes()
+        scales, biases = scales.astype('<f4'), biases.astype('<f4')
+        data[end:end] = scales.tobytes() + biases.tobytes()
+        # Realized draws, exactly as stored in the model; weight noise is too large and stays in the file.
+        feature = dict(layer=target['name'], scales=scales.tolist(), biases=biases.tolist())
     directory = Path(directory)
     directory.mkdir(parents=True, exist_ok=False)
     base = directory / 'realesr-animevideov3'
@@ -70,4 +73,4 @@ def model_copy(directory, settings):
     inspect_model(param, binary)
     return base, dict(param_sha256=sha256(param), binary_sha256=sha256(binary),
                       original_param_sha256=inventory['param_sha256'],
-                      original_binary_sha256=inventory['binary_sha256'])
+                      original_binary_sha256=inventory['binary_sha256'], feature=feature)
