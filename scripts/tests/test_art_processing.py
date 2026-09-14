@@ -102,12 +102,13 @@ class ProcessingTests(unittest.TestCase):
         self.assertEqual(actual, rng(19, 'weight:Conv_16').bytes(32).hex())
 
     def test_cancel_waits_for_child_and_releases_context(self):
-        session, processes = Session(), []
+        session, processes, flags = Session(), [], []
         original = subprocess.Popen
 
         def capture(*args, **kwargs):
             process = original(*args, **kwargs)
             processes.append(process)
+            flags.append(kwargs.get('creationflags'))
             session.cancel()
             return process
 
@@ -115,6 +116,8 @@ class ProcessingTests(unittest.TestCase):
             with self.assertRaises(Cancelled), session:
                 run_process([sys.executable, '-c', 'import time; time.sleep(30)'], stdout=subprocess.PIPE)
         self.assertIsNotNone(processes[0].poll())
+        # A pythonw GUI must not open a console window for each child process.
+        self.assertEqual(flags, [subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0])
         self.assertFalse(session.active)
         self.assertFalse(issubclass(Cancelled, KeyboardInterrupt))
         self.assertTrue(is_cancellation(Cancelled()) and is_cancellation(KeyboardInterrupt()))

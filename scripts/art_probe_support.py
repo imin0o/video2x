@@ -10,7 +10,7 @@ import time
 from pathlib import Path
 
 from art_model_inspect import ROOT, sha256
-from art_processing_session import run_process, timed
+from art_processing_session import NO_WINDOW, run_process, timed
 
 TILE_VARIABLE = 'VIDEO2X_ART_TILE'
 
@@ -59,7 +59,7 @@ def sampled_run(args, log, samples, cwd=ROOT, tile=None, on_frames=None):
             if smi:
                 monitor = subprocess.Popen([smi, '--query-gpu=uuid,name,memory.used',
                                             '--format=csv,noheader,nounits', '-lms', '200'],
-                                           stdout=output, stderr=subprocess.DEVNULL)
+                                           stdout=output, stderr=subprocess.DEVNULL, creationflags=NO_WINDOW)
             command(args, log, cwd=cwd, env=env, on_tick=tick if log and on_frames else None)
     finally:
         if monitor:

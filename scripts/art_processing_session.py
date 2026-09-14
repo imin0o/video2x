@@ -7,12 +7,15 @@ completed, failed or cancelled ends a run.
 """
 import contextlib
 import contextvars
+import os
 import subprocess
 import threading
 import time
 
 _CURRENT = contextvars.ContextVar('art_execution', default=None)
 _END = object()
+# A windowless parent (pythonw GUI) would otherwise give each console child a visible console window.
+NO_WINDOW = subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
 STAGES = ('prepare', 'decode-source', 'input-transform', 'inference', 'verify-inference', 'reinput-resize',
           'output-transform', 'encode-output', 'mux-audio', 'verify-output', 'verify-audio')
 
@@ -120,7 +123,7 @@ def timed_iter(iterable, operation):
 
 def run_process(args, on_tick=None, **kwargs):
     checkpoint()
-    with subprocess.Popen(args, **kwargs) as process:
+    with subprocess.Popen(args, creationflags=NO_WINDOW, **kwargs) as process:
         try:
             while True:
                 try:

@@ -75,8 +75,11 @@ class RenderController(QObject):
     def accept_outcome(self, token, outcome):
         if token != self.token:
             return
-        if self.cancelled:
-            outcome = dict(state='cancelled', directory=outcome['directory'])
+        if self.cancelled and outcome['state'] == 'completed':
+            # Work past the last checkpoint still finishes; keep it off the display but say it was saved.
+            outcome = dict(state='cancelled', directory=outcome['directory'],
+                           error=f"取消が間に合わず処理は完了しました。結果は保存済みですが、表示には採用していません: "
+                                 f"{outcome['record']['result']}")
         self.outcome.emit(outcome)
 
     def cancel(self):

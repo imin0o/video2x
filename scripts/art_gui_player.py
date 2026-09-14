@@ -30,7 +30,7 @@ def comparison_frames(record, stop):
 class ComparisonPlayer(QWidget):
     def __init__(self):
         super().__init__()
-        self.record, self.thread, self.pending = None, None, None
+        self.record, self.thread, self.pending, self.pictures = None, None, None, None
         self.stop = threading.Event()
         self.frames = queue.Queue(maxsize=2)
         self.playing = False
@@ -131,7 +131,16 @@ class ComparisonPlayer(QWidget):
             return
         # If decoding is slow, slow both panes together rather than allowing frame drift.
         self.position, self.anchor, self.end = start, time.monotonic(), end
-        for label, picture in zip(self.labels, pictures):
-            label.setPixmap(QPixmap.fromImage(picture).scaled(label.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        self.pictures = pictures
+        self.show_pictures()
         self.stamp.setText(f'元時刻 {start:.6f} 秒 · 左：元映像 / 右：結果 · 無音')
         self.pending = None
+
+    def show_pictures(self):
+        for label, picture in zip(self.labels, self.pictures or ()):
+            label.setPixmap(QPixmap.fromImage(picture).scaled(label.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation))
+
+    def resizeEvent(self, event):
+        # A paused frame is only redrawn here, so rescale it to the new pane size.
+        super().resizeEvent(event)
+        self.show_pictures()

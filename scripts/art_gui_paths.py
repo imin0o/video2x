@@ -3,6 +3,7 @@ from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (QComboBox, QFileDialog, QFormLayout, QHBoxLayout,
                                QLineEdit, QPushButton, QWidget)
 
+from art_gui_form import ComboBox
 from art_gui_settings import FIELDS
 from art_model_inspect import ROOT
 
@@ -22,7 +23,7 @@ class PathsForm(QWidget):
         for key, label in zip(FIELDS, labels):
             row = QHBoxLayout()
             if key in ('output_scale', 'audio'):
-                widget = QComboBox()
+                widget = ComboBox()
                 widget.addItems(['1', '2'] if key == 'output_scale' else ['pcm', 'omit'])
                 widget.setCurrentText(defaults[key])
                 widget.currentTextChanged.connect(self.changed)

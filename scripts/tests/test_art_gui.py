@@ -16,10 +16,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import av
 import numpy as np
+from PySide6.QtCore import QPoint, QPointF, Qt
+from PySide6.QtGui import QWheelEvent
 from PySide6.QtWidgets import QApplication
 
 from art_gui import ArtWindow
-from art_gui_player import comparison_frames
+from art_gui_player import ComparisonPlayer, comparison_frames
 from art_gui_settings import document, load_document, save_document
 from art_gui_worker import RenderController
 from art_processing_config import configuration
@@ -90,9 +92,38 @@ class GuiTests(unittest.TestCase):
 
     def test_changed_settings_do_not_relabel_existing_result(self):
         self.window.result_snapshot = self.window.snapshot()
+        self.window.paths.widgets['output_root'].setText(str(self.root / 'elsewhere'))
+        self.assertIn('一致', self.window.dirty.text())
         self.window.form.widgets['input_noise'].setValue(3)
         self.assertIn('未反映', self.window.dirty.text())
         self.assertEqual(self.window.result_snapshot['configuration']['settings']['input_noise'], 0)
+
+    def test_wheel_over_unfocused_controls_does_not_change_values(self):
+        before = self.window.snapshot()
+        for widget in (self.window.form.widgets['input_noise'], self.window.form.widgets['feature_mode'],
+                       self.window.paths.widgets['audio']):
+            point = QPointF(widget.rect().center())
+            APP.sendEvent(widget, QWheelEvent(point, widget.mapToGlobal(point), QPoint(), QPoint(0, 120),
+                                              Qt.NoButton, Qt.NoModifier, Qt.NoScrollPhase, False))
+        self.assertEqual(before, self.window.snapshot())
+
+    def test_progress_and_outcome_update_window(self):
+        window, done = self.window, str(self.root / 'done')
+        window.on_progress(dict(stage='inference', completed=3, total=10, total_exact=True, elapsed_seconds=1.0))
+        self.assertEqual((window.progress.maximum(), window.progress.value()), (10, 3))
+        window.on_progress(dict(stage='inference', completed=12, total=10, total_exact=False, elapsed_seconds=2.0))
+        self.assertEqual(window.progress.maximum(), 0)
+        window.on_progress(dict(stage='verify-audio', completed=None, total=None, total_exact=None, elapsed_seconds=3.0))
+        with patch.object(window.player, 'load') as load:
+            window.on_outcome(dict(state='completed', directory=done, record={'result': done + '/result.mkv'},
+                                   snapshot=window.snapshot()))
+        load.assert_called_once()
+        window.on_outcome(dict(state='failed', directory=str(self.root / 'broken'), error='ValueError: bad'))
+        self.assertIn('bad', window.status.text())
+        # The folder button and comparison stay on the displayed success.
+        self.assertEqual(window.last_directory, done)
+        self.assertTrue(window.buttons['folder'].isEnabled())
+        self.assertIn('一致', window.dirty.text())
 
     def test_cancel_race_stale_notification_and_new_request(self):
         controller = RenderController()
@@ -121,6 +152,34 @@ class GuiTests(unittest.TestCase):
         self.assertEqual([o['state'] for o in outcomes], ['cancelled', 'completed'])
         self.assertEqual(set(threads), {threading.get_ident()})
 
+    def test_late_cancel_reports_saved_result_and_keeps_failure_reason(self):
+        controller, outcomes = RenderController(), []
+        controller.outcome.connect(outcomes.append)
+        started, release = threading.Event(), threading.Event()
+
+        def finish(result):
+            def work(*args, session, **kwargs):
+                started.set()
+                release.wait(5)
+                if isinstance(result, Exception):
+                    raise result
+                return result
+            return work
+
+        with patch('art_gui_worker.request', return_value={}), patch('art_gui_worker.baseline_context', return_value={}):
+            for result in ({'result': 'saved.mkv'}, ValueError('disk full')):
+                started.clear()
+                release.clear()
+                with patch('art_gui_worker.run', side_effect=finish(result)):
+                    controller.start(self.window.snapshot(), self.root/'late')
+                    pump(started.is_set)
+                    controller.cancel()  # After the last checkpoint: the work still ends on its own.
+                    release.set()
+                    pump(lambda: controller.worker is None)
+        self.assertEqual([o['state'] for o in outcomes], ['cancelled', 'failed'])
+        self.assertTrue('保存済み' in outcomes[0]['error'] and 'saved.mkv' in outcomes[0]['error'])
+        self.assertIn('disk full', outcomes[1]['error'])
+
     def test_failure_then_success_and_close_waits(self):
         controller = self.window.controller
         outcomes = []
@@ -132,6 +191,10 @@ class GuiTests(unittest.TestCase):
         self.assertEqual(outcomes[0]['state'], 'failed')
         self.assertIn('bad source', outcomes[0]['error'])
         with patch('art_gui_worker.request', return_value={}), patch('art_gui_worker.baseline_context', return_value={}):
+            with patch('art_gui_worker.run', return_value={'result': 'ok'}):
+                controller.start(self.window.snapshot(), self.root/'success')
+                pump(lambda: controller.worker is None)
+            self.assertEqual(outcomes[1]['state'], 'completed')
             with patch('art_gui_worker.run', side_effect=lambda *a, session, **k: session.cancelled.wait(2)):
                 controller.start(self.window.snapshot(), self.root/'close')
                 self.window.close()
@@ -164,6 +227,21 @@ class GuiTests(unittest.TestCase):
         self.window.player.toggle()
         pump(lambda: not self.window.player.play_button.isEnabled())
         self.assertIn('終了', self.window.player.stamp.text())
+        player, sizes = ComparisonPlayer(), []
+        try:
+            player.resize(600, 400)
+            player.show()
+            player.load(record)
+            pump(lambda: player.position is not None)
+            for width, height in [(900, 600), (450, 320)]:  # Paused: only a resize redraws the frame.
+                player.resize(width, height)
+                APP.processEvents()
+                label, pixmap = player.labels[1], player.labels[1].pixmap()
+                sizes.append(pixmap.width())
+                self.assertTrue(pixmap.width() <= label.width() and pixmap.height() <= label.height())
+            self.assertGreater(sizes[0], sizes[1])
+        finally:
+            player.shutdown()
 
 
 if __name__ == '__main__':

@@ -1,7 +1,7 @@
 """Only supported M2 controls are exposed, grouped by processing stage."""
 import secrets
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (QComboBox, QDoubleSpinBox, QFormLayout, QGroupBox,
                                QLabel, QLineEdit, QPushButton, QScrollArea, QVBoxLayout, QWidget)
 
@@ -21,6 +21,28 @@ GROUPS = [
     ('出力', [('output_blur', 'ぼかし', 0, 30), ('retain', '原像保持量', 0, 1),
               ('source_color', '元の色の保持', 0, 1), ('luma_change', '明度変化', 0, 1)]),
 ]
+
+
+class FocusedWheel:
+    """Scrolling past a control passes the wheel to the panel instead of changing an unselected value."""
+
+    def __init__(self, *args):
+        super().__init__(*args)
+        self.setFocusPolicy(Qt.StrongFocus)
+
+    def wheelEvent(self, event):
+        if self.hasFocus():
+            super().wheelEvent(event)
+        else:
+            event.ignore()
+
+
+class SpinBox(FocusedWheel, QDoubleSpinBox):
+    pass
+
+
+class ComboBox(FocusedWheel, QComboBox):
+    pass
 
 
 class SettingsForm(QScrollArea):
@@ -45,13 +67,13 @@ class SettingsForm(QScrollArea):
             box.setLayout(form)
             for key, label, *spec in fields:
                 if len(spec) == 2:
-                    widget = QDoubleSpinBox()
+                    widget = SpinBox()
                     widget.setDecimals(8)
                     widget.setRange(*spec)
                     widget.setSingleStep(.05 if spec[1] <= 2 else 1)
                     widget.valueChanged.connect(self.changed)
                 elif isinstance(spec[0], list):
-                    widget = QComboBox()
+                    widget = ComboBox()
                     widget.addItems(spec[0])
                     widget.currentTextChanged.connect(self.changed)
                 else:

@@ -20,6 +20,11 @@ from art_gui_worker import RenderController
 from art_model_inspect import ROOT
 
 
+def comparable(snapshot):
+    # The save folder decides where a run is written, not what it produces.
+    return dict(snapshot, controls={k: v for k, v in snapshot['controls'].items() if k != 'output_root'})
+
+
 class ArtWindow(QMainWindow):
     def __init__(self, args):
         super().__init__()
@@ -81,7 +86,7 @@ class ArtWindow(QMainWindow):
         if self.result_snapshot is None:
             return
         try:
-            same = self.snapshot() == self.result_snapshot
+            same = comparable(self.snapshot()) == comparable(self.result_snapshot)
         except ValueError:
             same = False
         self.dirty.setText('表示中の結果と現在の設定は一致' if same else '設定変更あり · 表示中の結果には未反映')
@@ -144,11 +149,12 @@ class ArtWindow(QMainWindow):
     def on_outcome(self, outcome):
         self.progress.setRange(0, 100)
         self.progress.setValue(100 if outcome['state'] == 'completed' else 0)
-        self.last_directory = outcome['directory']
-        self.buttons['folder'].setEnabled(Path(self.last_directory).is_dir())
         state = {'completed': '完了', 'cancelled': '取消済み', 'failed': '失敗'}[outcome['state']]
-        self.status.setText(f"{state} · {outcome.get('error', '')}\n出力先: {self.last_directory}")
+        self.status.setText(f"{state} · {outcome.get('error', '')}\n出力先: {outcome['directory']}")
         if outcome['state'] == 'completed':
+            # The folder button follows the displayed result; a later failure keeps pointing at it.
+            self.last_directory = outcome['directory']
+            self.buttons['folder'].setEnabled(True)
             self.result_snapshot = outcome['snapshot']
             self.result_info.setPlainText(outcome['record']['result'] + '\n'
                                          + json.dumps(self.result_snapshot, ensure_ascii=False, indent=2))
