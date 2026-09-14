@@ -1,5 +1,6 @@
 """Execute and verify one M1 candidate against a completed M0 baseline."""
 import json
+import os
 import platform
 import re
 import shutil
@@ -23,6 +24,10 @@ FFMPEG = ROOT / 'third_party/ffmpeg-shared/bin/ffmpeg.exe'
 def baseline_context(directory, cli):
     path = directory / 'run.json'
     record = json.loads(path.read_text(encoding='utf-8'))
+    return validate_baseline(record, cli)
+
+
+def validate_baseline(record, cli):
     if record.get('status') != 'completed' or record['recipe']['method'] != 'baseline-v1':
         raise ValueError('A completed M0 baseline is required')
     clip = Path(record['prepared_input']['path'])
@@ -76,7 +81,7 @@ def comparison(baseline, candidate, directory, input_blur_control=None):
                 layout=labels, display_width_per_panel=640, blur_control=str(blur))
 
 
-def execute(baseline, directory, settings, cli, make_comparison=True):
+def execute(baseline, directory, settings, cli, make_comparison=True, pin_tile=False):
     settings = recipe(settings)
     directory.mkdir(parents=True, exist_ok=False)
     record = dict(schema_version=1, status='running', recipe=settings,
@@ -125,8 +130,9 @@ def execute(baseline, directory, settings, cli, make_comparison=True):
             working_directory = directory if index == 0 else ROOT
             expected = (record['model']['param_sha256'], record['model']['binary_sha256']) if index == 0 else MODEL_HASHES
             model_files = resolved_model(working_directory, base, expected)
+            overrides = {'VIDEO2X_ART_TILE': str(baseline_run['effective']['tile'])} if pin_tile else {}
             measurements = sampled_run(invocation, log, directory / f'gpu-{index + 1}.csv',
-                                       cwd=working_directory)
+                                       cwd=working_directory, env=os.environ | overrides)
             diagnostics = parse_diagnostics(log)
             for key in ('gpu', 'tile', 'scale', 'prepadding', 'tta', 'precision'):
                 if diagnostics['effective'][key] != baseline_run['effective'][key]:
@@ -141,7 +147,8 @@ def execute(baseline, directory, settings, cli, make_comparison=True):
                 raise ValueError('Inference changed frame times/count or expected dimensions')
             pending.rename(output)
             record['runs'].append(dict(command=list(map(str, invocation)), cwd=str(working_directory), output=str(output),
-                                       model_files=model_files, measurements=measurements, **diagnostics))
+                                       model_files=model_files, environment_overrides=overrides,
+                                       measurements=measurements, **diagnostics))
             save_json(manifest, record)
         result = output
         if settings['output_blur'] or settings['retain'] or settings.get('source_color', 0):

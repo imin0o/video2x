@@ -1,6 +1,9 @@
 #include "filter_realesrgan.h"
 
 #include <chrono>
+#include <charconv>
+#include <cstdlib>
+#include <cstring>
 #include <cstdint>
 #include <cstdio>
 #include <filesystem>
@@ -38,6 +41,16 @@ FilterRealesrgan::~FilterRealesrgan() {
 }
 
 int FilterRealesrgan::init(AVCodecContext* dec_ctx, AVCodecContext* enc_ctx, AVBufferRef*) {
+    int pinned_tile = 0;
+    if (const char* value = std::getenv("VIDEO2X_ART_TILE")) {
+        const char* end = value + std::strlen(value);
+        const auto parsed = std::from_chars(value, end, pinned_tile);
+        if (parsed.ec != std::errc{} || parsed.ptr != end ||
+            (pinned_tile != 32 && pinned_tile != 64 && pinned_tile != 100 && pinned_tile != 200)) {
+            logger()->error("VIDEO2X_ART_TILE must be 32, 64, 100 or 200");
+            return -1;
+        }
+    }
     // Construct the model paths using std::filesystem
     std::filesystem::path model_param_path;
     std::filesystem::path model_bin_path;
@@ -105,6 +118,7 @@ int FilterRealesrgan::init(AVCodecContext* dec_ctx, AVCodecContext* enc_ctx, AVB
     } else {
         realesrgan_->tilesize = 32;
     }
+    if (pinned_tile) realesrgan_->tilesize = pinned_tile;
     logger()->debug("[art-baseline] gpu={} heap_budget_mb={} tile={} scale={} prepadding={} tta={}",
         gpuid_, heap_budget, realesrgan_->tilesize, realesrgan_->scale,
         realesrgan_->prepadding, tta_mode_);

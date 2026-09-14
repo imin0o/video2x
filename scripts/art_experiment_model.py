@@ -1,56 +1,12 @@
 """M1 model copies: typed weight mutation and Vulkan Scale feature intervention."""
-import hashlib
-import math
 from pathlib import Path
 
 import numpy as np
 
 from art_model_inspect import MODEL, inspect_model, sha256
 
-MODEL_HASHES = ('1393f7c0e885f9d15a0668329a13f695ebd0ea45791f46d28145d7934824d224',
-                '548a36f9c3f4ab8da56cd3b13badf23968bee207b396dad14d04b830e5f2ab2d')
-DEFAULTS = dict(version=1, seed=0, weight_mode='noise', weight_strength=0.0,
-                weight_layers=['Conv_16'], feature_mode='decay', feature_strength=0.0,
-                feature_layer='PRelu_17', input_noise=0.0, time_mode='fixed', period=4.0,
-                phase=0.0, input_blur=0.0, output_blur=0.0, passes=1, retain=0.0,
-                source_color=0.0, luma_change=0.5)
-
-
-def rng(seed, purpose):
-    digest = hashlib.sha256(f'm1-pcg64-v1:{seed}:{purpose}'.encode()).digest()
-    return np.random.Generator(np.random.PCG64(int.from_bytes(digest[:16], 'little')))
-
-
-def recipe(values):
-    if not isinstance(values, dict) or values.keys() - DEFAULTS.keys():
-        raise ValueError('Recipe must be an object with known M1 keys')
-    result = DEFAULTS | values
-    for key, low, high in [('weight_strength', 0, 2), ('feature_strength', 0, 1),
-                           ('input_noise', 0, 128), ('period', 0.01, 3600),
-                           ('phase', -3600, 3600), ('input_blur', 0, 30),
-                           ('output_blur', 0, 30), ('retain', 0, 1),
-                           ('source_color', 0, 1), ('luma_change', 0, 1)]:
-        value = result[key]
-        if type(value) not in (int, float) or not math.isfinite(value) or not low <= value <= high:
-            raise ValueError(f'{key} must be finite in [{low}, {high}]')
-    for key, low, high in [('version', 1, 1), ('seed', 0, 2**64 - 1), ('passes', 1, 2)]:
-        if type(result[key]) is not int or not low <= result[key] <= high:
-            raise ValueError(f'Invalid {key}')
-    for key, choices in [('weight_mode', ('noise', 'decay')),
-                         ('feature_mode', ('noise', 'decay', 'mask')),
-                         ('time_mode', ('fixed', 'smooth', 'smooth-constant'))]:
-        if result[key] not in choices:
-            raise ValueError(f'Unsupported {key}')
-    if result['weight_mode'] == 'decay' and result['weight_strength'] > 1:
-        raise ValueError('Weight decay must be <= 1')
-    layers = result['weight_layers']
-    if (not isinstance(layers, list) or not layers or any(not isinstance(x, str) for x in layers)
-            or len(set(layers)) != len(layers)
-            or set(layers) - {f'Conv_{i}' for i in range(0, 35, 2)}):
-        raise ValueError('Select unique supported convolution layers')
-    if result['feature_layer'] not in [f'PRelu_{i}' for i in range(1, 34, 2)]:
-        raise ValueError('Feature target must be a supported 64-channel PReLU')
-    return result
+from art_processing_config import MODEL_HASHES, recipe  # noqa: F401
+from art_processing_rng import rng
 
 
 def model_copy(directory, settings):

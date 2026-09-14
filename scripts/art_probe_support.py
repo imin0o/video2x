@@ -9,16 +9,17 @@ import time
 from pathlib import Path
 
 from art_model_inspect import ROOT, sha256
+from art_processing_session import run_process
 
 
-def command(args, log=None, cwd=ROOT):
+def command(args, log=None, cwd=ROOT, env=None):
     args = list(map(str, args))
     if log:
         with Path(log).open('w', encoding='utf-8') as output:
-            subprocess.run(args, cwd=cwd, stdout=output, stderr=subprocess.STDOUT, check=True)
+            run_process(args, cwd=cwd, stdout=output, stderr=subprocess.STDOUT, env=env)
         return ''
-    return subprocess.run(args, cwd=cwd, capture_output=True, check=True,
-                          encoding='utf-8', errors='replace').stdout
+    return run_process(args, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                       encoding='utf-8', errors='replace', env=env)
 
 
 def save_json(path, value):
@@ -33,7 +34,7 @@ def media_info(ffprobe, path):
                                '-show_streams', '-show_format', '-of', 'json', path]))
 
 
-def sampled_run(args, log, samples, cwd=ROOT):
+def sampled_run(args, log, samples, cwd=ROOT, env=None):
     monitor = None
     started = time.perf_counter()
     smi = shutil.which('nvidia-smi')
@@ -43,7 +44,7 @@ def sampled_run(args, log, samples, cwd=ROOT):
                 monitor = subprocess.Popen([smi, '--query-gpu=uuid,name,memory.used',
                                             '--format=csv,noheader,nounits', '-lms', '200'],
                                            stdout=output, stderr=subprocess.DEVNULL)
-            command(args, log, cwd=cwd)
+            command(args, log, cwd=cwd, env=env)
     finally:
         if monitor:
             monitor.terminate()

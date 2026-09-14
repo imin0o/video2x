@@ -11,6 +11,7 @@ from PIL import Image, ImageFilter
 
 from art_experiment_model import rng
 from art_experiment_color import restore_source_color
+from art_processing_session import checkpoint
 
 
 class InputNoise:
@@ -83,6 +84,7 @@ def transform(source, destination, settings, start=0, original=None, output_size
             stream.codec_context.time_base = source_stream.time_base
             noise = None
             for frame in reader.decode(video=0):
+                checkpoint()
                 pixels = frame.to_ndarray(format='bgr24')
                 update = time.perf_counter()
                 if stage == 'input':
