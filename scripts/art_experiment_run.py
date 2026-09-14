@@ -16,7 +16,7 @@ from art_experiment_model import MODEL_HASHES, model_copy, recipe
 from art_model_inspect import MODEL, ROOT, sha256
 from art_probe_support import (binary_inventory, command, decoded_hashes, parse_diagnostics,
                                sampled_run, save_json)
-from art_processing_session import is_cancellation
+from art_processing_session import is_cancellation, progress
 
 FFMPEG = ROOT / 'third_party/ffmpeg-shared/bin/ffmpeg.exe'
 
@@ -101,6 +101,8 @@ def execute(baseline, directory, settings, cli, make_comparison=True, pin_tile=F
                                  reinput='second pass is unmodified; Lanczos to source dimensions first',
                                  source_color='source chroma + mean/std-matched damaged luma; gamut-limited; input blur applied to color reference',
                                  audio='omitted for M1 visual experiments'))
+    if 'source_times' in baseline['prepared_input']:
+        record['semantics']['time'] = 'recorded rational source PTS per ordinal frame; raised-cosine blend of two fixed fields'
     manifest = directory / 'run.json'
     save_json(directory / 'recipe.json', settings)
     save_json(manifest, record)
@@ -116,7 +118,8 @@ def execute(baseline, directory, settings, cli, make_comparison=True, pin_tile=F
         if settings['input_noise'] or settings['input_blur']:
             input_path = directory / 'injected.mkv'
             record['transformations'].append(transform(clip, input_path, settings,
-                                                       start=baseline['source']['start_seconds']))
+                                                       start=baseline['source']['start_seconds'],
+                                                       source_times=baseline['prepared_input'].get('source_times')))
         stream = baseline['prepared_input']['probe']['streams'][0]
         size = stream['width'], stream['height']
         for index in range(settings['passes']):
@@ -137,9 +140,11 @@ def execute(baseline, directory, settings, cli, make_comparison=True, pin_tile=F
             model_files = resolved_model(working_directory, base, expected)
             tile = baseline_run['effective']['tile'] if pin_tile else None
             overrides = {} if tile is None else {'VIDEO2X_ART_TILE': str(tile)}
+            progress(f'inference-pass-{index + 1}', 0, len(source_frames))
             measurements = sampled_run(invocation, log, directory / f'gpu-{index + 1}.csv',
                                        cwd=working_directory, tile=tile)
             diagnostics = parse_diagnostics(log)
+            progress(f'inference-pass-{index + 1}', len(diagnostics['pre_encode_frames']), len(source_frames))
             for key in ('gpu', 'tile', 'scale', 'prepadding', 'tta', 'precision'):
                 if diagnostics['effective'][key] != baseline_run['effective'][key]:
                     raise ValueError(f'Effective {key} differs from baseline')
@@ -173,6 +178,8 @@ def execute(baseline, directory, settings, cli, make_comparison=True, pin_tile=F
     except BaseException as error:
         record['status'] = 'cancelled' if is_cancellation(error) else 'failed'
         record['error'] = f'{type(error).__name__}: {error}'
+        record['failure_logs'] = {str(p): p.read_text(encoding='utf-8', errors='replace').splitlines()[-20:]
+                                  for p in directory.glob('pass-*.log')}
         raise
     finally:
         preserved = (sha256(Path(baseline['source']['path'])) == baseline['source']['sha256']

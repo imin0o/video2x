@@ -2,6 +2,7 @@
 import contextvars
 import subprocess
 import threading
+import time
 
 _CURRENT = contextvars.ContextVar('art_execution', default=None)
 
@@ -15,12 +16,17 @@ def is_cancellation(error):
 
 
 class Session:
-    def __init__(self):
+    def __init__(self, on_progress=None):
         self.cancelled = threading.Event()
         self.active = False
         self._lock = threading.Lock()
+        self.on_progress = on_progress
+        self.started = time.perf_counter()
+        self.cancel_requested_at = None
+        self.last_progress = {}
 
     def cancel(self):
+        self.cancel_requested_at = time.perf_counter()
         self.cancelled.set()
 
     def check(self):
@@ -49,7 +55,20 @@ def checkpoint():
         session.check()
 
 
-def run_process(args, **kwargs):
+def progress(stage, completed=None, total=None):
+    session = _CURRENT.get()
+    if session:
+        session.check()
+        if stage == 'inference' and total is None:
+            total = session.last_progress.get('total')
+        event = dict(stage=stage, completed=completed, total=total,
+                     elapsed_seconds=time.perf_counter() - session.started)
+        session.last_progress = event
+        if session.on_progress:
+            session.on_progress(event)
+
+
+def run_process(args, on_tick=None, **kwargs):
     checkpoint()
     with subprocess.Popen(args, **kwargs) as process:
         try:
@@ -59,6 +78,8 @@ def run_process(args, **kwargs):
                     break
                 except subprocess.TimeoutExpired:
                     checkpoint()
+                    if on_tick:
+                        on_tick()
             checkpoint()
             if process.returncode:
                 raise subprocess.CalledProcessError(process.returncode, args, stdout, stderr)

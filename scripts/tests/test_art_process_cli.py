@@ -39,6 +39,9 @@ class CliTests(unittest.TestCase):
                           ('--replay', 'run.json', '--output-dir', output, '--baseline-dir', 'm0'),
                           ('--recipe', self.source, '--save-recipe', saved, '--output-dir', output),
                           ('--recipe', self.source, '--save-recipe', saved, '--baseline-dir', 'm0'),
+                          ('--recipe', self.source, '--save-recipe', saved, '--input', 'source.mp4'),
+                          ('--recipe', self.source, '--baseline-dir', 'm0', '--output-dir', output, '--start', '1'),
+                          ('--replay', 'run.json', '--output-dir', output, '--output-scale', '1'),
                           ('--recipe', self.source, '--output-dir', output),
                           ('--recipe', self.source, '--baseline-dir', 'm0', '--output-dir', self.root)):
             with self.subTest(arguments=arguments):

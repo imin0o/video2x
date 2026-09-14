@@ -9,7 +9,8 @@ MODEL_HASHES = ('1393f7c0e885f9d15a0668329a13f695ebd0ea45791f46d28145d7934824d22
 DEFAULTS = dict(version=1, seed=0, weight_mode='noise', weight_strength=0.0,
                 weight_layers=['Conv_16'], feature_mode='decay', feature_strength=0.0,
                 feature_layer='PRelu_17', input_noise=0.0, time_mode='fixed', period=4.0,
-                phase=0.0, input_blur=0.0, output_blur=0.0, passes=1, retain=0.0,
+                phase=0.0, modulation_depth=1.0, modulation_target='input_noise',
+                input_blur=0.0, output_blur=0.0, passes=1, retain=0.0,
                 source_color=0.0, luma_change=0.5)
 
 
@@ -19,7 +20,7 @@ def recipe(values):
     result = copy.deepcopy(DEFAULTS | values)
     for key, low, high in [('weight_strength', 0, 2), ('feature_strength', 0, 1),
                            ('input_noise', 0, 128), ('period', 0.01, 3600),
-                           ('phase', -3600, 3600), ('input_blur', 0, 30),
+                           ('phase', -3600, 3600), ('modulation_depth', 0, 1), ('input_blur', 0, 30),
                            ('output_blur', 0, 30), ('retain', 0, 1),
                            ('source_color', 0, 1), ('luma_change', 0, 1)]:
         value = result[key]
@@ -30,7 +31,8 @@ def recipe(values):
             raise ValueError(f'Invalid {key}')
     for key, choices in [('weight_mode', ('noise', 'decay')),
                          ('feature_mode', ('noise', 'decay', 'mask')),
-                         ('time_mode', ('fixed', 'smooth', 'smooth-constant'))]:
+                         ('time_mode', ('fixed', 'smooth', 'smooth-constant')),
+                         ('modulation_target', ('input_noise',))]:
         if result[key] not in choices:
             raise ValueError(f'Unsupported {key}')
     if result['weight_mode'] == 'decay' and result['weight_strength'] > 1:

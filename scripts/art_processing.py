@@ -42,11 +42,18 @@ def completed_run(record):
     runs = engine.get('runs') if isinstance(engine, dict) else None
     if (not isinstance(runs, list) or not runs
             or any(not isinstance(r, dict) or 'pre_encode_frames' not in r for r in runs)
-            or type(record.get('schema_version')) is not int or record['schema_version'] != 2
+            or type(record.get('schema_version')) is not int or record['schema_version'] not in (2, 3)
             or record.get('status') != 'completed' or not isinstance(record.get('final_frames'), list)
             or not {'run_id', 'configuration', 'baseline', 'environment'} <= record.keys()):
         raise ValueError('Replay needs a completed M2 run.json')
     configuration(record['configuration'])
+    if record['schema_version'] == 3 and not {'video_request', 'source_sha256', 'delivery'} <= record.keys():
+        raise ValueError('M3 replay needs source and interval settings')
+    if record['schema_version'] == 3:
+        from art_video_source import validate_request
+        validate_request(record['video_request'])
+        if not isinstance(record['delivery'], dict) or not isinstance(record['delivery'].get('audio_verification'), list):
+            raise ValueError('M3 replay needs decoded audio verification')
     return record
 
 
@@ -59,11 +66,14 @@ def without_baseline(engine):
     return {key: value for key, value in engine.items() if key != 'baseline'}
 
 
-def run(baseline, directory, values, cli, session=None, replay=None):
+def run(baseline, directory, values, cli, session=None, replay=None, video=None):
     """All input validation precedes output creation. Each pass uses a fresh CLI process."""
     config = configuration(values)
     if replay is not None:
         completed_run(replay)
+    if video is not None or (replay and replay['schema_version'] == 3):
+        from art_video_run import run_video
+        return run_video(baseline, directory, values, cli, video or replay['video_request'], session, replay)
     baseline = copy.deepcopy(baseline)
     cli, directory = Path(cli).resolve(), Path(directory).resolve()
     session = session or Session()

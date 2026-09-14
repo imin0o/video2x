@@ -11,7 +11,7 @@ from PIL import Image, ImageFilter
 
 from art_experiment_model import rng
 from art_experiment_color import restore_source_color
-from art_processing_session import checkpoint
+from art_processing_session import checkpoint, progress
 
 
 class InputNoise:
@@ -20,12 +20,12 @@ class InputNoise:
         self.first = rng(seed, 'input:0').standard_normal(shape).astype(np.float32)
         self.second = rng(seed, 'input:1').standard_normal(shape).astype(np.float32)
 
-    def apply(self, pixels, strength, seconds, mode='fixed', period=4, phase=0):
+    def apply(self, pixels, strength, seconds, mode='fixed', period=4, phase=0, depth=1):
         if strength == 0:
             return pixels
         field = self.first
         if mode in ('smooth', 'smooth-constant'):
-            alpha = (1 - math.cos(2 * math.pi * (seconds / period + phase))) / 2
+            alpha = depth * (1 - math.cos(2 * math.pi * (seconds / period + phase))) / 2
             field = (1 - alpha) * field + alpha * self.second
             if mode == 'smooth-constant':
                 # Independent unit fields: keep the noise variance constant across the blend.
@@ -68,7 +68,8 @@ def video_signature(path):
     return [signature(frame) for frame in frames(path)]
 
 
-def transform(source, destination, settings, start=0, original=None, output_size=None, stage='input'):
+def transform(source, destination, settings, start=0, original=None, output_size=None, stage='input',
+              source_times=None):
     """Preserve prepared-clip timestamps; time modulation adds the source start offset."""
     started = time.perf_counter()
     pending = Path(destination).with_suffix('.partial.mkv')
@@ -95,8 +96,10 @@ def transform(source, destination, settings, start=0, original=None, output_size
                         if noise is None:
                             noise = InputNoise(pixels.shape, settings['seed'])
                         pixels = noise.apply(pixels, settings['input_noise'],
-                                             start + float(frame.pts * frame.time_base),
-                                             settings['time_mode'], settings['period'], settings['phase'])
+                                             float(Fraction(source_times[count])) if source_times is not None
+                                             else start + float(frame.pts * frame.time_base),
+                                             settings['time_mode'], settings['period'], settings['phase'],
+                                             settings.get('modulation_depth', 1))
                 pixels = resize(pixels, stream.width, stream.height)
                 if stage == 'output':
                     pixels = blur(pixels, settings['output_blur'])
@@ -120,6 +123,7 @@ def transform(source, destination, settings, start=0, original=None, output_size
                 for packet in stream.encode(out):
                     writer.mux(packet)
                 count += 1
+                progress(stage, count, len(source_times) if source_times is not None else None)
             if reference is not None and next(reference, None) is not None:
                 raise ValueError('Original/result frame counts differ')
             for packet in stream.encode():
