@@ -19,6 +19,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output-dir', type=Path, required=True)
     parser.add_argument('--baseline-dir', type=Path, default=ROOT / 'build/art/m2-baseline-2')
+    parser.add_argument('--cli', type=Path, default=ROOT / 'build/art/install/bin/video2x.exe')
     args = parser.parse_args()
     args.output_dir.mkdir(parents=True, exist_ok=False)
     app = QApplication([])
@@ -26,7 +27,7 @@ def main():
     app.setFont(QFont('Meiryo', 9))
     options = argparse.Namespace(input=ROOT / 'test/test.mp4',
                                  recipe=ROOT / 'build/art/m1-source-color/melt-16/recipe.json',
-                                 baseline_dir=args.baseline_dir, cli=ROOT / 'build/art/install/bin/video2x.exe')
+                                 baseline_dir=args.baseline_dir, cli=args.cli)
     window = ArtWindow(options)
     window.show()
     outcomes, heartbeats = [], 0

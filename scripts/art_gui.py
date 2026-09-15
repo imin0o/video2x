@@ -28,7 +28,7 @@ def comparable(snapshot):
 class ArtWindow(QMainWindow):
     def __init__(self, args):
         super().__init__()
-        self.setWindowTitle('Video2X Art · M4')
+        self.setWindowTitle('Video2X Art · 個人制作版')
         self.resize(1280, 900)
         self.result_snapshot, self.last_directory, self.closing = None, None, False
         self.form, self.paths = SettingsForm(), PathsForm(args)
