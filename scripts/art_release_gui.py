@@ -13,8 +13,7 @@ from PySide6.QtGui import QFont, QFontDatabase
 
 from art_experiment_model import model_copy
 from art_gui import ArtWindow
-from art_gui_settings import save_document
-from art_model_inspect import ROOT
+from art_model_inspect import MODEL, ROOT
 from art_probe_support import save_json
 from art_video_verify import indexed
 
@@ -65,7 +64,12 @@ def workflow(output, baseline, cli, phase):
             if len({r['configuration']['settings']['seed'] for r in trials}) != 1:
                 raise AssertionError('A03 seed changed')
             window.form.widgets['input_noise'].setValue(6)
-            save_document(settings, window.form.config(), window.paths.values())
+            # The real save action; only the native file dialog result is supplied.
+            with patch('art_gui.QFileDialog.getSaveFileName', return_value=(str(settings), 'JSON (*.json)')), \
+                    patch('art_gui.QMessageBox.warning') as dialog:
+                window.save_settings()
+            if dialog.called or not settings.exists():
+                raise AssertionError(f'GUI settings were not saved: {window.status.text()}')
             returned = render()['record']
             if returned['final_frames'] != trials[1]['final_frames']:
                 raise AssertionError('A03 selected strength could not be restored')
@@ -94,7 +98,7 @@ def workflow(output, baseline, cli, phase):
 
         def missing_copy(*args, **kwargs):
             base, record = model_copy(*args, **kwargs)
-            base.with_name(base.name + '-x2.bin').unlink()  # Only this run's generated model copy.
+            base.with_name(MODEL.with_suffix('.bin').name).unlink()  # Only this run's generated model copy.
             return base, record
 
         with patch('art_experiment_run.model_copy', side_effect=missing_copy):

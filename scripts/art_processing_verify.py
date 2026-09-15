@@ -16,6 +16,8 @@ from art_processing import load_run, run
 from art_processing_config import configuration
 from art_processing_session import Cancelled, Session
 
+ADOPTED_RUN_DIRECTORIES = {'melt-16': 'a', 'melt-24': 'melt-24'}  # Read back by art_release_report.
+
 
 def verify(baseline_dir, output, cli, legacy):
     baseline = baseline_context(baseline_dir, cli)
@@ -26,7 +28,7 @@ def verify(baseline_dir, output, cli, legacy):
         for name in ('melt-16', 'melt-24'):
             configs[name] = configuration(json.loads((legacy / name / 'recipe.json').read_text(encoding='utf-8')))
         print('A: adopted melt-16', flush=True)
-        first = run(baseline, output / 'a', configs['melt-16'], cli)
+        first = run(baseline, output / ADOPTED_RUN_DIRECTORIES['melt-16'], configs['melt-16'], cli)
         print('B: independent input/weight/feature effects and two passes', flush=True)
         other = dict(seed=19, weight_strength=0.4, input_noise=3, feature_strength=0.2,
                      feature_mode='mask', passes=2, time_mode='smooth-constant')
@@ -86,7 +88,7 @@ def verify(baseline_dir, output, cli, legacy):
             raise AssertionError('Zero effects differ from the unmodified baseline')
         report['checks']['zero_A06'] = True
         print('Compatibility with both adopted M1 videos', flush=True)
-        strong = run(baseline, output / 'melt-24', configs['melt-24'], cli)
+        strong = run(baseline, output / ADOPTED_RUN_DIRECTORIES['melt-24'], configs['melt-24'], cli)
         for name, actual in (('melt-16', first), ('melt-24', strong)):
             parent = json.loads((legacy / name / 'run.json').read_text(encoding='utf-8'))
             reference = frames(parent['result'])

@@ -37,6 +37,7 @@ def verify(output, baseline, cli):
             save_json(output / 'environment-after.json', after)
             raise ValueError('Source, model, scripts, binaries or environment changed during verification')
         state['originals_and_environment_preserved'] = True
+        save_json(output / 'verification.json', state)  # The report re-reads integrity from disk.
         report = write_report(output)
         state['status'] = report['status']
     except BaseException as error:

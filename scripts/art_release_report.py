@@ -12,6 +12,7 @@ from urllib.parse import quote
 from art_experiment_run import FFMPEG, software_environment
 from art_model_inspect import MODEL, ROOT, sha256
 from art_probe_support import binary_inventory, command, gpu_inventory, save_json
+from art_processing_verify import ADOPTED_RUN_DIRECTORIES
 
 
 def load(path):
@@ -36,6 +37,9 @@ def inventory(cli, baseline):
 
 
 def summarize(output):
+    verification = load(output / 'verification.json')
+    if not verification.get('originals_and_environment_preserved') or verification.get('status') == 'failed':
+        raise ValueError('Verification integrity did not pass')
     processing, video, gui = [load(output / name / 'summary.json') for name in ('processing', 'video', 'gui')]
     workflow = load(output / 'workflow/summary.json')
     create = load(output / 'workflow/create.json')
@@ -48,7 +52,9 @@ def summarize(output):
     decision = load(decision_path)
     adopted = []
     for item in decision['adopted']:
-        run_path = output / 'processing' / ('a' if item['name'] == 'melt-16' else item['name']) / 'run.json'
+        if item['name'] not in ADOPTED_RUN_DIRECTORIES:
+            raise ValueError(f'No verification run for adopted recipe: {item["name"]}')
+        run_path = output / 'processing' / ADOPTED_RUN_DIRECTORIES[item['name']] / 'run.json'
         record = load(run_path)
         if sha256(Path(record['result'])) != record['result_sha256']:
             raise ValueError(f'Adopted verification output changed: {run_path}')
@@ -68,8 +74,10 @@ def summarize(output):
                     limitation='MemoryError injected after inference; no physical GPU exhaustion'),
         'A09': dict(technical='measured', creator='pending_wait_time_limit', evidence='video/summary.json'),
         'A10': dict(technical='passed', evidence=['processing/summary.json', 'gui/summary.json'])}
+    script = Path(__file__).resolve()
     return dict(status='technical_passed_creator_pending', acceptance=checks, adopted=adopted,
                 creator_decision=dict(path=str(decision_path), sha256=sha256(decision_path)),
+                report_script=dict(path=str(script), sha256=sha256(script)),
                 adopted_comparison_scope='M1 acceptance retained; fixed-recipe sampled prefix pixel equality',
                 performance=video['performance'], cancellation=video['cancelled'],
                 production=video['performance']['five_seconds']['wall_seconds'],
@@ -92,9 +100,6 @@ def accept(output, record, decision_path):
     for name, expected in decision['evidence'].items():
         if sha256(output / name) != expected:
             raise ValueError(f'Accepted evidence changed: {name}')
-    verification = load(output / 'verification.json')
-    if not verification.get('originals_and_environment_preserved') or verification['status'] == 'failed':
-        raise ValueError('Verification integrity did not pass')
     for key in ('A07', 'A09'):
         record['acceptance'][key]['creator'] = 'accepted_by_creator'
     record.update(status='completed_accepted', pending=[],
@@ -136,6 +141,9 @@ def page(output, record):
 
 
 def write_report(output, decision_path=None):
+    previous = output / 'summary.json'
+    if decision_path is None and previous.exists() and load(previous).get('status') == 'completed_accepted':
+        raise ValueError('Accepted report requires --decision to regenerate')
     record = summarize(output)
     if decision_path is not None:
         accept(output, record, decision_path)
