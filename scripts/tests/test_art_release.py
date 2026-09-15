@@ -11,7 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from art_model_inspect import sha256
 from art_probe_support import save_json
-from art_release_report import summarize
+from art_release_report import accept, summarize
 from art_release_verify import verify
 
 
@@ -53,6 +53,34 @@ class ReleaseTests(unittest.TestCase):
             (root / 'processing/a/result.mkv').write_bytes(b'changed')
             with self.assertRaisesRegex(ValueError, 'output changed'):
                 summarize(root)
+
+    def test_creator_decision_is_bound_to_exact_evidence(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            self.fixture(root)
+            (root / 'video/full').mkdir()
+            for name in ('environment.json', 'video/full/result.mkv', 'video/full/recipe.json', 'video/full/run.json'):
+                (root / name).write_bytes(b'evidence')
+            save_json(root / 'verification.json', dict(status='technical_passed_creator_pending',
+                                                      originals_and_environment_preserved=True))
+            names = ('environment.json', 'verification.json', 'processing/summary.json', 'video/summary.json',
+                     'gui/summary.json', 'workflow/create.json', 'workflow/summary.json',
+                     'video/full/result.mkv', 'video/full/recipe.json', 'video/full/run.json')
+            decision = dict(schema_version=1, status='accepted_by_creator', acceptance=dict(A07=True, A09=True),
+                            creator_instruction='Complete R21', date='2026-09-15', verification_directory=str(root),
+                            evidence={name: sha256(root / name) for name in names})
+            path = root / 'decision.json'
+            save_json(path, decision)
+            record = summarize(root)
+            accept(root, record, path)
+            self.assertEqual(record['status'], 'completed_accepted')
+            self.assertEqual(record['pending'], [])
+            self.assertEqual(record['acceptance']['A07']['creator'], 'accepted_by_creator')
+            with self.assertRaisesRegex(ValueError, 'does not accept this verification'):
+                accept(root / 'different-run', summarize(root), path)
+            (root / 'video/full/result.mkv').write_bytes(b'changed')
+            with self.assertRaisesRegex(ValueError, 'Accepted evidence changed'):
+                accept(root, summarize(root), path)
 
     def test_child_failure_persisted_without_approval_page(self):
         with tempfile.TemporaryDirectory() as temp:

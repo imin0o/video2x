@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "date": "2026-09-15",
+  "status": "accepted_by_creator",
+  "creator_instruction": "R21 完了させて",
+  "basis": "A07のちらつきとA09の待ち時間が最終確認待ちであると報告した後の、制作者による完了指示を現行構成の受入として記録する。新たな視聴を実施したとの申告はない。",
+  "verification_directory": "build/art/m5-verified-final",
+  "acceptance": {
+    "A07": true,
+    "A09": true
+  },
+  "wait_time_scope": {
+    "single_frame_observed_seconds": [
+      4.279212900000857,
+      4.6295934000081616
+    ],
+    "five_seconds_observed_seconds": [
+      200.09038160000637,
+      220.4226958999934
+    ],
+    "interpretation": "記録した個人制作環境での待ち時間を受け入れる。別環境の上限値や性能保証は定めない。"
+  },
+  "evidence": {
+    "environment.json": "348eccfadf54bbc3bf39b0df5272d26b93091f0f2ccb67b551348a3ee574d56d",
+    "verification.json": "ab42bb3b35f727a0d224a284091133184acb32d14b419c4fd5134bcd7ff75253",
+    "processing/summary.json": "b65179eebdd12d674ece2ca4a677c3afefc872ff2269bcc66566db4c3c6d50e0",
+    "video/summary.json": "7503aee629b7226bc3e685230be1c965b0d64972024dfdfef518c436251c3a4e",
+    "gui/summary.json": "20119f21fe233df497b68e643c1d05b44492b02fabf72b21ff320f91a8023625",
+    "workflow/create.json": "bae66526607c9bb728fe05226f810a5d6ee468d623e85f0ea1b8beacd6a9d922",
+    "workflow/summary.json": "969d4e01f2e5009cedb4ad087dd9d9da359f36941b1d94edee0e0294cd1f1ac8",
+    "video/full/result.mkv": "2c6c2f2ca9201353504252cb22bae11a3362b5bb8c3b82bceaaa4157fffc34d2",
+    "video/full/recipe.json": "2bd7ecb837d03c634010af1655e98e39abe6e75c422eea6738c5d3330a68a127",
+    "video/full/run.json": "36bcba1eb37b9eefba69f0a4ae845f3c4684fbf42edf9e28d8aa7745fe32c962"
+  }
+}

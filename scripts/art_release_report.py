@@ -1,4 +1,5 @@
 """Source-backed M5 inventory and acceptance index; never infer creator approval."""
+import argparse
 import html
 import importlib.metadata
 import json
@@ -76,6 +77,31 @@ def summarize(output):
                 pending=['Review flicker in video/full/result.mkv', 'Decide acceptable wait times'])
 
 
+def accept(output, record, decision_path):
+    decision = load(decision_path)
+    if (decision.get('schema_version') != 1 or decision.get('status') != 'accepted_by_creator'
+            or decision.get('acceptance') != {'A07': True, 'A09': True}
+            or not decision.get('creator_instruction')
+            or (ROOT / decision['verification_directory']).resolve() != output.resolve()):
+        raise ValueError('Creator decision does not accept this verification')
+    required = {'environment.json', 'verification.json', 'processing/summary.json', 'video/summary.json',
+                'gui/summary.json', 'workflow/create.json', 'workflow/summary.json',
+                'video/full/result.mkv', 'video/full/recipe.json', 'video/full/run.json'}
+    if set(decision['evidence']) != required:
+        raise ValueError('Creator decision must bind all verification evidence')
+    for name, expected in decision['evidence'].items():
+        if sha256(output / name) != expected:
+            raise ValueError(f'Accepted evidence changed: {name}')
+    verification = load(output / 'verification.json')
+    if not verification.get('originals_and_environment_preserved') or verification['status'] == 'failed':
+        raise ValueError('Verification integrity did not pass')
+    for key in ('A07', 'A09'):
+        record['acceptance'][key]['creator'] = 'accepted_by_creator'
+    record.update(status='completed_accepted', pending=[],
+                  final_creator_decision=dict(path=str(decision_path.resolve()), sha256=sha256(decision_path),
+                                              date=decision['date'], instruction=decision['creator_instruction']))
+
+
 def page(output, record):
     def link(path, label):
         relative = Path(os.path.relpath(Path(path), output)).as_posix()
@@ -95,18 +121,33 @@ def page(output, record):
         ('video/vfr/result.mkv', '可変フレームレート・音声付き'),
         ('workflow/settings.json', 'GUI保存設定'), ('workflow/gui.png', '再起動後のGUI'),
         ('summary.json', '測定値・受入記録'), ('environment.json', 'Windows・GPU・DLL・モデル構成')))
+    status = ('自動検証と制作者による受入が完了しました。' if record['status'] == 'completed_accepted'
+              else '自動検証は成功。ちらつきと許容待ち時間は制作者の判定待ち。')
+    if 'final_creator_decision' in record:
+        links += '<li>' + link(record['final_creator_decision']['path'], '制作者の受入記録') + '</li>'
     (output / 'index.html').write_text(
         '<!doctype html><html lang="ja"><meta charset="utf-8"><title>M5 制作確認</title>'
         '<style>body{font:16px system-ui;max-width:1000px;margin:32px auto;padding:0 16px}'
         'td,th{padding:8px;text-align:left;border-bottom:1px solid #ccc}li{margin:12px 0}</style>'
-        '<h1>M5 制作確認</h1><p>自動検証は成功。ちらつきと許容待ち時間は制作者の判定待ち。</p>'
+        f'<h1>M5 制作確認</h1><p>{status}</p>'
         '<table><tr><th>項目</th><th>技術確認</th><th>制作者の判断</th></tr>' + rows + '</table>'
         '<h2>採用レシピとの対応</h2><p>再生成動画は採用映像の冒頭区間と画素を比較しています。</p><ul>'
         + adopted + '</ul><h2>確認用ファイル</h2><ul>' + links + '</ul></html>', encoding='utf-8')
 
 
-def write_report(output):
+def write_report(output, decision_path=None):
     record = summarize(output)
+    if decision_path is not None:
+        accept(output, record, decision_path)
     save_json(output / 'summary.json', record)
     page(output, record)
     return record
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--output-dir', type=Path, required=True)
+    parser.add_argument('--decision', type=Path)
+    args = parser.parse_args()
+    result = write_report(args.output_dir.resolve(), args.decision)
+    print(result['status'])
