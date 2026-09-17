@@ -1,157 +1,180 @@
-<p align="center">
-   <img src="https://github.com/user-attachments/assets/5cd63373-e806-474f-94ec-6e04963bf90f"
-        alt="Video2X: A machine learning-based video super resolution and frame interpolation framework."/>
-   </br>
-   <img src="https://img.shields.io/github/v/release/k4yt3x/video2x?style=flat-square"/>
-   <img src="https://img.shields.io/github/downloads/k4yt3x/video2x/total?style=flat-square"/>
-   <img src="https://img.shields.io/github/license/k4yt3x/video2x?style=flat-square"/>
-   <img src="https://img.shields.io/github/sponsors/k4yt3x?style=flat-square&link=https%3A%2F%2Fgithub.com%2Fsponsors%2Fk4yt3x"/>
-   <img src="https://img.shields.io/badge/dynamic/json?color=%23e85b46&label=Patreon&query=data.attributes.patron_count&suffix=%20patrons&url=https%3A%2F%2Fwww.patreon.com%2Fapi%2Fcampaigns%2F4507807&style=flat-square"/>
-</p>
+# Video2X Art（非公式改造版）
 
-## 🌟 Version 6.0.0
+**このリポジトリは、[K4YT3X/Video2X](https://github.com/k4yt3x/video2x)をベースにした非公式の改造版です。**
+個人の映像制作向けに、AIモデルの重みや中間特徴に干渉する加工機能と、日本語GUIを追加しています。
+アプリの表示名は「Video2X Art · 個人制作版」です。
+上流のインストーラーには、本改造版の追加機能は含まれません。
 
-Video2X 6.0.0 highlights:
+Video2X本来の超解像とフレーム補間のコードを土台に、映像を溶かすような変形や質感の変化を試し、設定を保存して再生成できる制作環境を目指しています。
+現在のArt処理は、`realesr-animevideov3-x2`モデルを使うWindows向けの構成です。
 
-- Complete rewrite of the Video2X project in C/C++.
-- Faster and more efficient architecture.
-- Cross-platform support for Windows and Linux.
-- Vastly improved output quality.
-- New GUI and installer for easy setup on Windows.
+## 改造版で追加した機能
 
-<details>
-<summary>Click to see more details</summary>
+| 機能 | 内容 |
+| --- | --- |
+| 入力の加工 | ノイズ、ぼかし、元動画の時刻に沿ったノイズの時間変化 |
+| モデルへの干渉 | 選択した畳み込み層の重みへのノイズや減衰、中間特徴へのノイズ、減衰、マスク |
+| 再入力と仕上げ | 最大2回の推論、出力のぼかし、原像保持、元の色を使った仕上げ |
+| 動画出力 | 区間指定、等倍または2倍出力、可変フレームレートへの対応、PCM音声の保持または除外 |
+| 日本語GUI | 元映像と結果の同期比較、設定保存と読込、進捗表示、取消 |
+| 再生成と検証 | seed固定、JSONレシピ、実行条件とハッシュの記録、保存済み実行の再生成と照合 |
 
-Version 6.0.0 is a complete rewrite of this project in C/C++. It:
+元モデルから作業用コピーを作って加工し、元動画と元モデルのハッシュを検証します。
+GUIとCLIは共通のPython処理基盤を使用します。
 
-- genuinely works this time, with much less hassle compared to the 5.0.0 beta;
-- is blazing fast, thanks to the new optimized pipeline and the efficiency of C/C++;
-- is cross-platform, available now for both Windows and Linux;
-- offers significantly better output quality with Anime4K v4, Real-ESRGAN, Real-CUGAN, and RIFE;
-- supports two modes: filtering (upscaling) and frame interpolation;
-- supports Anime4K v4 and all custom MPV-compatible GLSL shaders;
-- supports Real-ESRGAN, Real-CUGAN, and RIFE (all models) via ncnn and Vulkan;
-- requires zero additional disk space during processing, just space for the final output.
+## 動作環境と制約
 
-</details>
+動作確認済みの構成はWindows 11 x64、NVIDIA GeForce RTX 4070 Ti SUPER、Python 3.14.3です。
+Python依存はNumPy 2.4.2、PyAV 18.0.0、Pillow 11.3.0、PySide6 6.11.1で検証しています。
+詳細な構成と測定結果は[個人制作版の検証記録](docs/art-tool-m5.md)を参照してください。
 
-![6.4.0-screenshot](https://github.com/user-attachments/assets/9b1cc8a7-2903-4d2c-80a2-8d81f007e45b)
+- Vulkan対応GPUとドライバーが必要です。Windows 10、別GPU、LinuxでのArt機能は未検証です。
+- 対応入力は正方画素の8ビットSDR動画です。HDRや未対応の画素形式、色行列は拒否します。
+- Art処理のモデルは`realesr-animevideov3-x2`に固定し、モデルのハッシュを検査します。
+- 出力は可逆圧縮FFV1のMatroska動画（`.mkv`）です。処理中は中間動画も保存するため、十分な空き容量が必要です。
+- 比較画面は無音です。音声付きの完成品は外部プレイヤーで確認してください。
+- プレビューも本番と同じ推論条件で処理します。リアルタイム処理やリアルタイム再生は保証しません。
+- 本改造版専用のインストーラーは含みません。ソース、ビルド済みCLI、依存DLL、モデル、基準記録をそろえて使用します。
 
-## 🖥️ Hardware Requirements
+## Windowsでの準備
 
-Your system must meet the minimum hardware requirements below to run Video2X.
+以下のコマンドはリポジトリ直下で実行します。
+ビルドにはGit、Visual Studio 2022のC++ x64ツール、CMake、Vulkan SDK、Pythonが必要です。
 
-- **CPU**
-  - The precompiled binaries require CPUs with AVX2 support.
-  - **Intel**: Haswell (Q2 2013) or newer
-  - **AMD**: Excavator (Q2 2015) or newer
-- **GPU**
-  - The GPU must support Vulkan.
-  - **NVIDIA**: Kepler (GTX 600 series, Q2 2012) or newer
-  - **AMD**: GCN 1.0 (Radeon HD 7000 series, Q1 2012) or newer
-  - **Intel**: HD Graphics 4000 (Q2 2012) or newer
+### 1. Python依存とCLIを準備する
 
-## [🪟 Install on Windows](https://docs.video2x.org/installing/windows-qt6.html)
+```powershell
+python -m pip install -r scripts/art-gui-requirements.txt
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/build-art-windows.ps1
+```
 
-**[Download the Latest Windows Installer Executable (6.4.0)](https://github.com/k4yt3x/video2x/releases/download/6.4.0/video2x-qt6-windows-amd64-installer.exe)**
+Vulkan SDKの既定パスは`C:\VulkanSDK\1.4.350.0`です。
+異なる場合はビルドコマンドに`-VulkanSdk <インストール先>`を追加します。
+ビルドスクリプトは必要なsubmoduleとFFmpeg、ncnnの依存を取得し、CLIを`build/art/install/bin/video2x.exe`へ配置します。
+詳細は[基準環境とビルド手順](docs/art-tool-m0.md)に記載しています。
 
-You can download the latest Windows release on the [releases page](https://github.com/k4yt3x/video2x/releases/latest). For basic GUI usage, refer to the [documentation](https://docs.video2x.org/running/desktop.html). If you're unable to download directly from GitHub, try the [mirror site](https://files.k4yt3x.com). The GUI currently supports the following languages:
+### 2. 基準記録を作成する
 
-- English (United States)
-- 简体中文（中国）
-- 日本語（日本）
-- Português (Portugal)
-- Français (France)
-- Deutsch (Deutschland)
+**基準記録**は、無改変モデルの出力、GPU、タイル条件、実行環境を保存したものです。
+Art処理はこの記録を読み込んで推論条件を決めます。
+手元の対応動画を`test/test.mp4`として用意するか、`--input`を自分の動画のパスに置き換えてください。
 
-## [🐧 Install on Linux](https://docs.video2x.org/installing/linux.html)
+```powershell
+python -B scripts/art_model_inspect.py --output build/art/model-check.json
+python -B scripts/art_probe.py --input test/test.mp4 --output-dir build/art/m2-baseline-2 --start 0 --duration 5 --seed 0
+```
 
-Video2X packages are available for the Linux distros listed below. A universal AppImage is also available for other distros. If you'd like to build it from source code, refer to the [PKGBUILD](packaging/arch/PKGBUILD) file for a general overview of the required dependencies and commands.
+出力先には未使用のフォルダーを指定します。
+`build/`内の基準記録や採用レシピ、`test/`内の動画はGit管理外のため、cloneだけでは取得できません。
+既存の基準記録は参照入力の絶対パスとハッシュを保持するので、別環境では作成し直してください。
 
-- Arch Linux: AUR packages, maintained by [@K4YT3X](https://github.com/k4yt3x).
-  - [aur/video2x](https://aur.archlinux.org/packages/video2x)
-  - [aur/video2x-git](https://aur.archlinux.org/packages/video2x-git)
-  - [aur/video2x-qt6](https://aur.archlinux.org/packages/video2x-qt6)
-  - [aur/video2x-qt6-git](https://aur.archlinux.org/packages/video2x-qt6-git)
-- Arch Linux (Chinese Mainland): archlinuxcn packages, maintained by [@Integral-Tech](https://github.com/Integral-Tech).
-  - [archlinuxcn/video2x](https://github.com/archlinuxcn/repo/tree/master/archlinuxcn/video2x)
-  - [archlinuxcn/video2x-git](https://github.com/archlinuxcn/repo/tree/master/archlinuxcn/video2x-git)
-  - [archlinuxcn/video2x-qt6](https://github.com/archlinuxcn/repo/tree/master/archlinuxcn/video2x-qt6)
-  - [archlinuxcn/video2x-qt6-git](https://github.com/archlinuxcn/repo/tree/master/archlinuxcn/video2x-qt6-git)
-- Other distros: `Video2X-x86_64.AppImage` on the [releases page](https://github.com/k4yt3x/video2x/releases/latest).
+## GUIの使い方
 
-## [📦 Container Image](https://docs.video2x.org/running/container.html)
+基準記録を作成したら、次のコマンドで起動します。
 
-Video2X [container images](https://github.com/k4yt3x/video2x/pkgs/container/video2x) are available on the GitHub Container Registry for easy deployment on Linux and macOS. If you already have Docker/Podman installed, only one command is needed to start upscaling a video. For more information on how to use Video2X's Docker image, please refer to the [documentation](https://docs.video2x.org/running/container.html).
+```powershell
+python -B scripts/art_gui.py --input test/test.mp4 --baseline-dir build/art/m2-baseline-2
+```
 
-## [📔 Google Colab](https://colab.research.google.com/drive/1gWEwcA9y57EsxwOjmLNmNMXPsafw0kGo)
+依存を導入したPythonに`.pyw`が関連付いている場合は、[start_art_gui.pyw](scripts/start_art_gui.pyw)のダブルクリックでも起動できます。
+CLIや基準記録の場所は画面から変更できます。
 
-You can use Video2X on [Google Colab](https://colab.research.google.com/) **for free** if you don't have a powerful GPU of your own. You can borrow a powerful GPU (NVIDIA T4, L4, or A100) on Google's server for free for a maximum of 12 hours per session. **Please use the free resource fairly** and do not create sessions back-to-back and run upscaling 24/7. This might result in you getting banned. You can get [Colab Pro/Pro+](https://colab.research.google.com/signup/pricing) if you'd like to use better GPUs and get longer runtimes. Usage instructions are embedded in the [Colab Notebook](https://colab.research.google.com/drive/1gWEwcA9y57EsxwOjmLNmNMXPsafw0kGo).
+1. 元動画、開始秒、終了秒、保存先を選びます。全編を処理する場合は開始を`0`、終了を空欄にします。
+2. 入力、モデル内部、再入力、出力の効果を調整します。既存のレシピは「設定読込」で開けます。
+3. seedを固定して「区間プレビュー」を実行し、左の元映像と右の結果を比較します。
+4. 気に入った設定を「設定保存」で新しいJSONファイルへ保存します。
+5. 本番の区間を指定して「本番書出し」を実行します。
 
-## [💬 Telegram Discussion Group](https://t.me/video2x)
+完成品は実行ごとのフォルダーに`result.mkv`として保存されます。
+音声の`pcm`はPCM変換して保持、`omit`は除外を意味します。
+既存の設定ファイルは上書きできないため、変更版は別名で保存してください。
+操作の詳細は[GUIの説明](docs/art-tool-m4.md)を参照してください。
 
-Join our Telegram discussion group to ask any questions you have about Video2X, chat directly with the developers, or discuss super resolution, frame interpolation technologies, or the future of Video2X in general.
+## CLIでの処理と再生成
 
-## [📖 Documentation](https://docs.video2x.org/)
+GUIで生成した実行フォルダーの`recipe.json`はCLIでも使用できます。
+以下の`path/to/recipe.json`は、そのファイルのパスに置き換えてください。
+「設定保存」で作るGUI設定JSONには画面の操作値も含まれるため、CLIには実行フォルダー内のレシピを渡します。
 
-Comprehensive documentation for Video2X is available at [https://docs.video2x.org/](https://docs.video2x.org/). It offers detailed instructions on how to [build](https://docs.video2x.org/building/index.html), [install](https://docs.video2x.org/installing/index.html), [use](https://docs.video2x.org/running/index.html), and [develop](https://docs.video2x.org/developing/index.html) with this program.
+```powershell
+python -B scripts/art_process.py --recipe path/to/recipe.json --baseline-dir build/art/m2-baseline-2 --input test/test.mp4 --start 0 --end 5 --output-scale 2 --audio pcm --output-dir build/art/my-production
+```
 
-## 📽️ Video Demos (Outdated)
+`--end`を省略すると末尾まで処理します。
+`--output-dir`には未使用のフォルダーを指定してください。
+保存した実行を同じ条件で再生成するには、次のコマンドを使います。
 
-![Spirited Away Demo](https://user-images.githubusercontent.com/21986859/49412428-65083280-f73a-11e8-8237-bb34158a545e.png)\
-_Upscale demo: Spirited Away's movie trailer_
+```powershell
+python -B scripts/art_process.py --replay build/art/my-production/run.json --output-dir build/art/my-replay
+```
 
-- **Spirited Away**: [YouTube](https://youtu.be/mGEfasQl2Zo) | [Bilibili](https://www.bilibili.com/video/BV1V5411471i/)
-  - 360P to 4K
-  - The [original video](https://www.youtube.com/watch?v=ByXuk9QqQkk)'s copyright belongs to 株式会社スタジオジブリ
-- **Bad Apple!!**: [YouTube](https://youtu.be/A81rW_FI3cw) | [Bilibili](https://www.bilibili.com/video/BV16K411K7ue)
-  - 384P 30 FPS to 4K 120 FPS with waifu2x and DAIN
-  - The [original video](https://www.nicovideo.jp/watch/sm8628149)'s copyright belongs to あにら
-- **The Pet Girl of Sakurasou**: [YouTube](https://youtu.be/M0vDI1HH2_Y) | [Bilibili](https://www.bilibili.com/video/BV14k4y167KP/)
-  - 240P 29.97 to 1080P 60 FPS with waifu2x and DAIN
-  - The original video's copyright belongs to ASCII Media Works
+再生成時は映像の画素と音声のPCMハッシュを照合します。
+コード、CLI、DLL、FFmpeg、Python依存、GPU環境などが記録時から変わると再生成を拒否します。
+環境を更新した場合は、基準記録を取り直してレシピから新規に処理してください。
 
-### Standard Test Clip
+| 出力ファイル | 内容 |
+| --- | --- |
+| `result.mkv` | 完成動画 |
+| `result.json` | 完成動画と実行記録への参照 |
+| `run.json` | 設定、入力、環境、進捗、計測値、検証結果 |
+| `recipe.json` | CLIでも再利用できる加工設定 |
+| `input.mkv` | 比較用の入力映像 |
 
-The following clip can be used to test if your setup works properly. This is also the standard clip used for running performance benchmarks.
+成功時はその実行で生成した中間動画を削除します。
+調査用に残す場合は`--keep-intermediates`を指定します。
+失敗時と取消時は中間ファイルとログを残します。
+詳しくは[動画処理と出力仕様](docs/art-tool-m3.md)を参照してください。
 
-- [Standard Test Clip (240P)](https://files.k4yt3x.com/resources/videos/standard-test.mp4) 4.54 MiB
-- [Real-CUGAN Upscaled Sample (1704P)](https://files.k4yt3x.com/resources/videos/standard-realcugan.mp4) 3.5 MiB
-- [Real-ESRGAN Upscaled Sample (1704P)](https://files.k4yt3x.com/resources/videos/standard-realesrgan.mp4) 3.1 MiB
-- [waifu2x Upscaled Sample (1080P)](https://files.k4yt3x.com/resources/videos/standard-waifu2x.mp4) 4.54 MiB
-- [Ground Truth (1080P)](https://files.k4yt3x.com/resources/videos/standard-original.mp4) 22.2 MiB
+## 検証と開発資料
 
-The original clip came from the anime "さくら荘のペットな彼女."\
-Copyright of this clip belongs to 株式会社アニプレックス.
+Python処理とGUIの回帰テストは次のコマンドで実行できます。
 
-## ⚖️ License
+```powershell
+python -B -m unittest discover -s scripts/tests
+```
 
-This project is licensed under [GNU AGPL version 3](https://www.gnu.org/licenses/agpl-3.0.txt).\
+実GPUを使った一連の検証には、ローカルの基準記録、採用レシピ、テスト動画が必要です。
+準備するファイルと検証コマンドは[個人制作版の検証記録](docs/art-tool-m5.md)を参照してください。
+2026年9月16日の記録では、81件の回帰テスト、Ruff、実GPU検証が成功しています。
+これは記録された個人制作環境での結果です。
+
+- [要件定義](docs/art-tool-requirements.md)
+- [開発ロードマップ](docs/art-tool-roadmap.md)
+- [M0：基準環境と試作用CLI](docs/art-tool-m0.md)
+- [M1：表現の試作](docs/art-tool-m1.md)
+- [M2：共通処理基盤](docs/art-tool-m2.md)
+- [M3：時間変化と本番動画](docs/art-tool-m3.md)
+- [M4：簡易GUI](docs/art-tool-m4.md)
+- [M5：個人制作版と受入記録](docs/art-tool-m5.md)
+
+## 上流のVideo2Xについて
+
+本改造版の基盤であるVideo2Xは、C/C++による動画の超解像とフレーム補間のプロジェクトです。
+Anime4K、Real-ESRGAN、Real-CUGAN、RIFEなどの処理を備えています。
+上流版の説明や配布物は以下を参照してください。
+本改造版の追加機能と導入手順は、このREADMEと`docs/art-tool-*.md`に記載しています。
+
+- [上流リポジトリ](https://github.com/k4yt3x/video2x)
+- [上流版のリリース](https://github.com/k4yt3x/video2x/releases)
+- [上流のドキュメント](https://docs.video2x.org/)
+- [このリポジトリ内の上流由来ドキュメント](docs/book/src/README.md)
+
+## ライセンスと謝辞
+
+本プロジェクトのライセンスは[GNU AGPL version 3](LICENSE)です。
+上流の著作権表示は以下のとおりです。
+
 Copyright (C) 2018-2025 K4YT3X and [contributors](https://github.com/k4yt3x/video2x/graphs/contributors).
 
-![AGPLv3](https://www.gnu.org/graphics/agplv3-155x51.png)
+Video2Xの開発者と貢献者、および以下の依存プロジェクトに感謝します。
 
-This project includes or depends on these following projects:
+| プロジェクト | ライセンス |
+| --- | --- |
+| [FFmpeg](https://www.ffmpeg.org/) | LGPLv2.1、GPLv2 |
+| [ncnn](https://github.com/Tencent/ncnn) | BSD 3-Clause |
+| [Anime4K](https://github.com/bloc97/Anime4K) | MIT |
+| [Real-CUGAN ncnn Vulkan](https://github.com/nihui/realcugan-ncnn-vulkan) | MIT |
+| [RIFE ncnn Vulkan](https://github.com/nihui/rife-ncnn-vulkan) | MIT |
+| [Real-ESRGAN ncnn Vulkan](https://github.com/xinntao/Real-ESRGAN-ncnn-vulkan) | MIT |
 
-| Project                                                                               | License         |
-| ------------------------------------------------------------------------------------- | --------------- |
-| [FFmpeg/FFmpeg](https://www.ffmpeg.org/)                                              | LGPLv2.1, GPLv2 |
-| [Tencent/ncnn](https://github.com/Tencent/ncnn)                                       | BSD 3-Clause    |
-| [bloc97/Anime4K](https://github.com/bloc97/Anime4K)                                   | MIT License     |
-| [nihui/realcugan-ncnn-vulkan](https://github.com/nihui/realcugan-ncnn-vulkan)         | MIT License     |
-| [nihui/rife-ncnn-vulkan](https://github.com/nihui/rife-ncnn-vulkan)                   | MIT License     |
-| [xinntao/Real-ESRGAN-ncnn-vulkan](https://github.com/xinntao/Real-ESRGAN-ncnn-vulkan) | MIT License     |
-
-More licensing information can be found in the [NOTICE](NOTICE) file.
-
-## 🌺 Special Thanks
-
-Special thanks to the following individuals for their significant contributions to the project, listed in alphabetical order.
-
-- [@ArchieMeng](https://github.com/archiemeng)
-- [@BrianPetkovsek](https://github.com/BrianPetkovsek)
-- [@Integral-Tech](https://github.com/Integral-Tech)
-- [@ddouglas87](https://github.com/ddouglas87)
-- [@lhanjian](https://github.com/lhanjian)
-- [@nihui](https://github.com/nihui)
-- [@sat3ll](https://github.com/sat3ll)
+追加のライセンス情報は[NOTICE](NOTICE)を参照してください。
