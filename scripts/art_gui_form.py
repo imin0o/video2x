@@ -7,6 +7,12 @@ from PySide6.QtWidgets import (QComboBox, QDoubleSpinBox, QFormLayout, QGroupBox
 
 from art_processing_config import DEFAULTS, configuration
 
+# Creator-approved standard melt-16 (docs/art-tool-m1-acceptance.json).
+# GUI startup only; portable recipes keep their original neutral defaults.
+STARTUP_SETTINGS = dict(seed=0, weight_mode='noise', weight_strength=.6,
+                        weight_layers=[f'Conv_{i}' for i in range(0, 35, 2)],
+                        input_blur=16, source_color=1, luma_change=.5)
+
 GROUPS = [
     ('入力', [('input_noise', 'ノイズ強度', 0, 128), ('input_blur', 'ぼかし', 0, 30)]),
     ('モデル内部 · 重み', [('weight_mode', '方式', ['noise', 'decay']),
@@ -71,7 +77,7 @@ class SettingsForm(QScrollArea):
                     widget.setDecimals(8)
                     widget.setRange(*spec)
                     widget.setSingleStep(.05 if spec[1] <= 2 else 1)
-                    widget.valueChanged.connect(self.changed)
+                    widget.valueChanged.connect(lambda value, k=key: self.number_changed(k))
                 elif isinstance(spec[0], list):
                     widget = ComboBox()
                     widget.addItems(spec[0])
@@ -91,7 +97,7 @@ class SettingsForm(QScrollArea):
         self.setWidget(body)
         self.setWidgetResizable(True)
         self.setMinimumWidth(360)
-        self.set_config(configuration({}))
+        self.set_config(configuration(STARTUP_SETTINGS))
         self.widgets['weight_mode'].currentTextChanged.connect(self.update_enabled)
         self.widgets['time_mode'].currentTextChanged.connect(self.update_enabled)
         self.update_enabled()
@@ -100,6 +106,10 @@ class SettingsForm(QScrollArea):
         self.widgets['weight_strength'].setMaximum(1 if self.widgets['weight_mode'].currentText() == 'decay' else 2)
         for key in ('period', 'phase', 'modulation_depth'):
             self.widgets[key].setEnabled(self.widgets['time_mode'].currentText() != 'fixed')
+
+    def number_changed(self, key):
+        self.original_numbers.pop(key, None)
+        self.changed.emit()
 
     def config(self):
         values = dict(DEFAULTS, seed=int(self.seed.text()))
@@ -135,3 +145,4 @@ class SettingsForm(QScrollArea):
             self.original_numbers[key] = 0
             self.widgets[key].setValue(0)
         self.widgets['passes'].setCurrentText('1')
+        self.changed.emit()

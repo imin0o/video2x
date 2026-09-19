@@ -51,6 +51,22 @@ class GuiTests(unittest.TestCase):
         APP.processEvents()
         self.temp.cleanup()
 
+    def test_startup_uses_adopted_standard_and_source_size(self):
+        expected = configuration(dict(seed=0, weight_mode='noise', weight_strength=.6,
+                                      weight_layers=[f'Conv_{i}' for i in range(0, 35, 2)],
+                                      input_blur=16, source_color=1, luma_change=.5))
+        self.assertEqual(self.window.form.config(), expected)
+        controls = self.window.paths.values()
+        self.assertEqual((controls['start'], controls['end'], controls['output_scale']), ('0', '5', '1'))
+        # An explicit recipe overrides the startup preset, including omitted neutral settings.
+        path = self.root / 'recipe.json'
+        path.write_text(json.dumps(dict(seed=42)), encoding='utf-8')
+        window = ArtWindow(argparse.Namespace(input=None, recipe=path, baseline_dir=self.root, cli=self.root/'cli.exe'))
+        try:
+            self.assertEqual(window.form.config(), configuration(dict(seed=42)))
+        finally:
+            window.close()
+
     def test_recipe_roundtrip_seed_precision_and_reset(self):
         config = configuration(dict(seed=2**64-1, weight_strength=1.23456789123456, input_noise=6,
                                     time_mode='smooth', retain=.3, passes=2))
@@ -75,6 +91,22 @@ class GuiTests(unittest.TestCase):
         self.assertEqual(result['passes'], 1)
         self.assertTrue(all(result[k] == 0 for k in ('weight_strength', 'feature_strength', 'input_noise',
                                                    'input_blur', 'output_blur', 'retain', 'source_color', 'luma_change')))
+
+    def test_edited_number_does_not_restore_hidden_recipe_precision(self):
+        self.window.form.set_config(configuration(dict(weight_strength=.123456789123)))
+        widget = self.window.form.widgets['weight_strength']
+        shown = widget.value()
+        widget.setValue(.5)
+        widget.setValue(shown)
+        self.assertEqual(self.window.form.config()['settings']['weight_strength'], shown)
+
+    def test_reset_notifies_when_only_hidden_precision_changes(self):
+        self.window.form.set_config(configuration(dict(input_noise=1e-10, luma_change=0)))
+        self.window.result_snapshot = self.window.snapshot()
+        self.window.changed()
+        self.window.form.reset_effects()
+        self.assertEqual(self.window.form.config()['settings']['input_noise'], 0)
+        self.assertIn('未反映', self.window.dirty.text())
 
     def test_unsupported_and_invalid_documents_are_atomic(self):
         value = self.window.snapshot()

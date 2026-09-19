@@ -15,7 +15,7 @@ class PathsForm(QWidget):
         super().__init__()
         layout = QFormLayout(self)
         self.widgets = {}
-        defaults = dict(source=str(args.input or ''), start='0', end='5', output_scale='2', audio='pcm',
+        defaults = dict(source=str(args.input or ''), start='0', end='5', output_scale='1', audio='pcm',
                         baseline_dir=str(args.baseline_dir), cli=str(args.cli),
                         output_root=str(ROOT / 'build/art/gui'))
         labels = ('元動画', '開始（秒）', '終了（秒・空欄は末尾）', '出力倍率', '音声',
