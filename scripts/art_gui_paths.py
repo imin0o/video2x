@@ -18,7 +18,7 @@ class PathsForm(QWidget):
         defaults = dict(source=str(args.input or ''), start='0', end='5', output_scale='1', audio='pcm',
                         baseline_dir=str(args.baseline_dir), cli=str(args.cli),
                         output_root=str(ROOT / 'build/art/gui'))
-        labels = ('元動画', '開始（秒）', '終了（秒・空欄は末尾）', '出力倍率', '音声',
+        labels = ('元動画', 'プレビュー開始（秒）', 'プレビュー終了（秒・空欄は末尾）', '出力倍率', '音声',
                   '基準記録フォルダー', 'Video2X実行ファイル', '保存先フォルダー')
         for key, label in zip(FIELDS, labels):
             row = QHBoxLayout()

@@ -31,6 +31,7 @@ class ArtWindow(QMainWindow):
         self.setWindowTitle('Video2X Art · 個人制作版')
         self.resize(1280, 900)
         self.result_snapshot, self.last_directory, self.closing = None, None, False
+        self.active_production = self.result_production = False
         self.form, self.paths = SettingsForm(), PathsForm(args)
         self.player, self.controller = ComparisonPlayer(), RenderController(self)
         self.form.changed.connect(self.changed)
@@ -49,14 +50,14 @@ class ArtWindow(QMainWindow):
         self.buttons = {}
         for name, label, action in [('load', '設定読込', self.load_settings), ('save', '設定保存', self.save_settings),
                                     ('preview', '区間プレビュー', lambda: self.start(False)),
-                                    ('export', '本番書出し', lambda: self.start(True)),
+                                    ('export', '本番書出し（全編）', lambda: self.start(True)),
                                     ('cancel', '取消', self.cancel), ('folder', '出力先を開く', self.open_output)]:
             button = QPushButton(label)
             button.clicked.connect(action)
             row.addWidget(button)
             self.buttons[name] = button
         body.addLayout(row)
-        body.addWidget(QLabel('プレビュー・本番とも指定区間を処理します。全編は開始0・終了空欄。音声 pcm はPCM変換、omit は除外。'))
+        body.addWidget(QLabel('開始・終了はプレビュー用です。本番書出しは常に全編を処理します。音声 pcm はPCM変換、omit は除外。'))
         self.dirty = QLabel('生成結果はまだありません')
         body.addWidget(self.dirty)
         body.addWidget(self.player, 1)
@@ -79,14 +80,17 @@ class ArtWindow(QMainWindow):
         if args.recipe:
             self.load_settings(args.recipe)
 
-    def snapshot(self):
-        return document(self.form.config(), self.paths.values())
+    def snapshot(self, production=False):
+        values = self.paths.values()
+        if production:
+            values.update(start='0', end='')
+        return document(self.form.config(), values)
 
     def changed(self):
         if self.result_snapshot is None:
             return
         try:
-            same = comparable(self.snapshot()) == comparable(self.result_snapshot)
+            same = comparable(self.snapshot(self.result_production)) == comparable(self.result_snapshot)
         except ValueError:
             same = False
         self.dirty.setText('表示中の結果と現在の設定は一致' if same else '設定変更あり · 表示中の結果には未反映')
@@ -116,13 +120,14 @@ class ArtWindow(QMainWindow):
 
     def start(self, production):
         try:
-            snapshot = self.snapshot()
+            snapshot = self.snapshot(production)
             values = snapshot['controls']
             if not values['source'].strip() or not values['output_root'].strip():
                 raise ValueError('元動画と保存先を指定してください')
             name = ('export-' if production else 'preview-') + datetime.now().strftime('%Y%m%d-%H%M%S-') + uuid.uuid4().hex[:8]
             directory = Path(values['output_root']).resolve() / name
             self.controller.start(snapshot, directory)
+            self.active_production = production
             self.status.setText(f'開始準備中 · 出力先: {directory}')
         except (OSError, ValueError, RuntimeError) as error:
             self.show_error(error)
@@ -156,6 +161,7 @@ class ArtWindow(QMainWindow):
             self.last_directory = outcome['directory']
             self.buttons['folder'].setEnabled(True)
             self.result_snapshot = outcome['snapshot']
+            self.result_production = self.active_production
             self.result_info.setPlainText(outcome['record']['result'] + '\n'
                                          + json.dumps(self.result_snapshot, ensure_ascii=False, indent=2))
             self.player.load(outcome['record'])

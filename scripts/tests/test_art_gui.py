@@ -92,6 +92,42 @@ class GuiTests(unittest.TestCase):
         self.assertTrue(all(result[k] == 0 for k in ('weight_strength', 'feature_strength', 'input_noise',
                                                    'input_blur', 'output_blur', 'retain', 'source_color', 'luma_change')))
 
+    def test_export_uses_full_source_and_preview_keeps_selected_interval(self):
+        paths = self.window.paths.widgets
+        paths['source'].setText(str(self.root / 'source.mov'))
+        for start, end in [('0', '5'), ('12', '17')]:
+            paths['start'].setText(start)
+            paths['end'].setText(end)
+            before = self.window.snapshot()
+            with patch.object(self.window.controller, 'start') as render:
+                self.window.buttons['preview'].click()
+                preview = render.call_args.args[0]
+                self.window.buttons['export'].click()
+                exported, directory = render.call_args.args
+            self.assertEqual(preview, before)
+            self.assertEqual(exported['controls'], before['controls'] | dict(start='0', end=''))
+            self.assertEqual(exported['configuration'], before['configuration'])
+            self.assertTrue(directory.name.startswith('export-'))
+            self.assertEqual(self.window.snapshot(), before)
+        with patch.object(self.window.player, 'load'):
+            self.window.on_outcome(dict(state='completed', directory=str(directory),
+                                       record={'result': str(directory / 'result.mkv')}, snapshot=exported))
+        self.assertIn('一致', self.window.dirty.text())
+        paths['end'].setText('18')
+        self.assertIn('一致', self.window.dirty.text())
+        self.window.form.widgets['input_noise'].setValue(6)
+        self.assertIn('未反映', self.window.dirty.text())
+
+    def test_export_ignores_invalid_preview_interval(self):
+        self.window.paths.widgets['source'].setText(str(self.root / 'source.mov'))
+        self.window.paths.widgets['start'].setText('invalid')
+        with patch.object(self.window.controller, 'start') as render, patch.object(self.window, 'show_error') as error:
+            self.window.buttons['export'].click()
+            error.assert_not_called()
+            self.assertEqual(render.call_args.args[0]['controls']['end'], '')
+            self.window.buttons['preview'].click()
+            error.assert_called_once()
+
     def test_edited_number_does_not_restore_hidden_recipe_precision(self):
         self.window.form.set_config(configuration(dict(weight_strength=.123456789123)))
         widget = self.window.form.widgets['weight_strength']
